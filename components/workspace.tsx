@@ -1,15 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, CircleHelp, GitBranch, Layers3, LoaderCircle, MoreHorizontal, Plus, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, CircleHelp, FileText, GitBranch, Layers3, LoaderCircle, MoreHorizontal, Pencil, Plus, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
 import type { Step, StepType } from "@/lib/types";
-import { createId, createProject, explainProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
+import { createId, createProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
+import { clampNodePosition } from "@/lib/layout";
+import { getRouteNumber } from "@/lib/step-numbering";
 import { download, filename } from "@/lib/storage";
 import { useProject } from "@/lib/use-project";
-import Diagram from "./diagram";
+import Diagram, { type DiagramRouteSelection } from "./diagram";
+import CanvasInspector from "./canvas-inspector";
+import ExplanationTable from "./explanation-table";
 
 type Tab = "people" | "steps" | "explanation";
-type Modal = "reset" | "sample" | "help" | null;
+type Modal = "reset" | "sample" | "help" | "table" | null;
 
 const tabs: { value: Tab; label: string }[] = [
   { value: "people", label: "İştirakçılar" },
@@ -21,16 +25,19 @@ export default function Workspace() {
   const { project, ready, saveState, undoCount, update, undo, replace, reset, unsavedReplacement, confirmReplacement, cancelReplacement, notice, setNotice } = useProject();
   const [tab, setTab] = useState<Tab>("people");
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedRoute, setSelectedRoute] = useState<DiagramRouteSelection | null>(null);
+  const [inspectorStep, setInspectorStep] = useState<string | null>(null);
+  const [newShapeType, setNewShapeType] = useState<StepType>("task");
   const [modal, setModal] = useState<Modal>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingWord, setExportingWord] = useState(false);
   const formScroll = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const previousProject = useRef("");
   const issues = useMemo(() => validateProject(project), [project]);
   const errors = issues.filter(issue => issue.level === "error");
   const lanes = project.pools.flatMap(pool => pool.lanes.map(lane => ({ ...lane, poolName: pool.name })));
-  const explanation = useMemo(() => explainProject(project), [project]);
   const activeModal = unsavedReplacement ? "unsaved" : modal;
 
   useEffect(() => {
@@ -38,9 +45,16 @@ export default function Workspace() {
     previousProject.current = project.id;
     setTab(project.steps.length ? "steps" : "people");
     setSelected(project.steps[0]?.id ?? null);
+    setSelectedRoute(null);
+    setInspectorStep(null);
     setMenuOpen(false);
     formScroll.current?.scrollTo({ top: 0 });
   }, [ready, project.id, project.steps]);
+
+  useEffect(() => {
+    if (inspectorStep && !project.steps.some(step => step.id === inspectorStep)) setInspectorStep(null);
+    if (selectedRoute && !project.steps.find(step => step.id === selectedRoute.sourceId)?.routes[selectedRoute.routeIndex]) setSelectedRoute(null);
+  }, [project.steps, inspectorStep, selectedRoute]);
 
   useEffect(() => {
     if (tab !== "steps" || !selected) return;
@@ -74,6 +88,55 @@ export default function Workspace() {
 
   function updateStep(id: string, patch: Partial<Step>) {
     update(current => ({ ...current, steps: current.steps.map(step => step.id === id ? { ...step, ...patch } : step) }));
+  }
+
+  function selectStep(id: string) {
+    setSelected(id);
+    setSelectedRoute(null);
+    if (inspectorStep && inspectorStep !== id) setInspectorStep(null);
+    setTab("steps");
+  }
+
+  function editStep(id: string) {
+    selectStep(id);
+    setInspectorStep(id);
+  }
+
+  function selectRoute(sourceId: string, routeIndex: number) {
+    setSelected(sourceId);
+    setSelectedRoute({ sourceId, routeIndex });
+    setInspectorStep(null);
+    setTab("steps");
+  }
+
+  function removeRoute(sourceId: string, routeIndex: number) {
+    update(current => ({ ...current, steps: current.steps.map(step => step.id === sourceId ? { ...step, routes: step.routes.filter((_, index) => index !== routeIndex) } : step) }));
+    if (selectedRoute?.sourceId === sourceId) {
+      if (selectedRoute.routeIndex === routeIndex) setSelectedRoute(null);
+      else if (selectedRoute.routeIndex > routeIndex) setSelectedRoute({ sourceId, routeIndex: selectedRoute.routeIndex - 1 });
+    }
+  }
+
+  function moveStep(id: string, position: { x: number; y: number }) {
+    const bounded = clampNodePosition(position);
+    update(current => {
+      const step = current.steps.find(item => item.id === id);
+      if (!step || (step.position?.x === bounded.x && step.position?.y === bounded.y)) return current;
+      return { ...current, steps: current.steps.map(item => item.id === id ? { ...item, position: bounded } : item) };
+    });
+  }
+
+  function resetLayout() {
+    update(current => current.steps.some(step => step.position) ? { ...current, steps: current.steps.map(({ position, ...step }) => { void position; return step; }) } : current);
+  }
+
+  function connectSteps(sourceId: string, targetId: string) {
+    const source = project.steps.find(step => step.id === sourceId);
+    if (!source || source.type === "end" || sourceId === targetId || !project.steps.some(step => step.id === targetId)) return;
+    if (source.routes.some(route => route.targetId === targetId)) { setNotice("Bu iki addım artıq bağlıdır."); return; }
+    if (source.routes.length >= 200) { setNotice("Bir addımda maksimum 200 keçid ola bilər."); return; }
+    updateStep(source.id, { routes: [...source.routes, { targetId, label: "", description: "" }] });
+    selectRoute(source.id, source.routes.length);
   }
 
   function openSample() {
@@ -125,11 +188,11 @@ export default function Workspace() {
     update(current => ({ ...current, pools: current.pools.map(pool => pool.id === poolId ? { ...pool, lanes: pool.lanes.filter(lane => lane.id !== laneId) } : pool) }));
   }
 
-  function addStep(type: StepType = "task") {
+  function addStep(type: StepType = "task", openInspector = false) {
     if (!lanes.length) { setNotice("Əvvəl ən azı bir icraçı əlavə et."); setTab("people"); return; }
     if (project.steps.length >= 200) { setNotice("Bir layihədə maksimum 200 addım ola bilər."); return; }
     const step: Step = {
-      id: createId(), laneId: lanes[0].id, type,
+      id: createId(), laneId: project.steps.find(item => item.id === selected)?.laneId ?? lanes[0].id, type,
       title: type === "start" ? "Başlanğıc" : type === "end" ? "Son" : "Yeni addım",
       description: "", routes: [],
     };
@@ -139,6 +202,8 @@ export default function Workspace() {
       step,
     ] }));
     setSelected(step.id);
+    setSelectedRoute(null);
+    setInspectorStep(openInspector ? step.id : null);
     setTab("steps");
   }
 
@@ -146,6 +211,8 @@ export default function Workspace() {
     const index = project.steps.findIndex(step => step.id === id);
     update(current => ({ ...current, steps: current.steps.filter(step => step.id !== id).map(step => ({ ...step, routes: step.routes.filter(route => route.targetId !== id) })) }));
     if (selected === id) setSelected(project.steps[index + 1]?.id ?? project.steps[index - 1]?.id ?? null);
+    if (inspectorStep === id) setInspectorStep(null);
+    setSelectedRoute(null);
   }
 
   function addRoute(step: Step) {
@@ -169,8 +236,15 @@ export default function Workspace() {
     finally { setExporting(false); }
   }
 
-  function exportText() {
-    download(explanation, `${filename(project.name)}-izah.txt`, "text/plain;charset=utf-8");
+  async function exportWord() {
+    setExportingWord(true);
+    try {
+      const { generateDocx } = await import("@/lib/docx");
+      const data = await generateDocx(project);
+      download(new Uint8Array(data).buffer, `${filename(project.name)}-izah.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      setNotice("Word cədvəli hazırdır. Yükləmə başladıldı.");
+    } catch { setNotice("Word faylı hazırlana bilmədi. Yenidən yoxla."); }
+    finally { setExportingWord(false); }
   }
 
   return <div className="studio-shell">
@@ -192,6 +266,7 @@ export default function Workspace() {
             <button type="button" className="menu-backdrop" aria-label="Menyunu bağla" onClick={()=>setMenuOpen(false)}/>
             <div className="project-menu">
               <button type="button" onClick={()=>{setMenuOpen(false);setModal("help");}}><CircleHelp size={16}/> Necə işləyir?</button>
+              <a href="/designs"><Layers3 size={16}/> İnterfeys nümunələri</a>
               <button type="button" className="danger-menu-item" onClick={()=>{setMenuOpen(false);setModal("reset");}}><Trash2 size={16}/> Hər şeyi sil</button>
             </div>
           </>}
@@ -252,8 +327,10 @@ export default function Workspace() {
                     {step.type==="end"?<p className="field-help">Bu qol burada tamamlanır.</p>:<>
                       {!step.routes.length && <p className="field-help">Keçid əlavə edərək axını davam etdir.</p>}
                       {step.routes.map((route,routeIndex)=><div className="route-card" key={routeIndex}>
-                        <div className="route-row"><label className="field-label">{gateway?`Qol ${routeIndex+1}`:"Hədəf addım"}<select aria-label={`Keçid ${routeIndex+1} hədəfi`} value={route.targetId} onChange={event=>updateStep(step.id,{routes:step.routes.map((item,i)=>i===routeIndex?{...item,targetId:event.target.value}:item)})}><option value="">Addımı seç</option>{project.steps.filter(item=>item.id!==step.id).map(item=><option key={item.id} value={item.id}>{project.steps.indexOf(item)+1}. {item.title||"Adsız addım"}</option>)}</select></label><button type="button" className="icon-button small-icon" aria-label={`Keçid ${routeIndex+1} sil`} onClick={()=>updateStep(step.id,{routes:step.routes.filter((_,i)=>i!==routeIndex)})}><X size={14}/></button></div>
-                        <label className="field-label">{gateway?"Şərt / əməliyyat":"Keçidin adı"}<input aria-label={`Keçid ${routeIndex+1} şərti`} placeholder={gateway?"Məsələn, Təsdiq / İmtina":"İstəyə bağlı"} maxLength={500} value={route.label} onChange={event=>updateStep(step.id,{routes:step.routes.map((item,i)=>i===routeIndex?{...item,label:event.target.value}:item)})}/></label>
+                        {step.routes.length>1 && <span className="branch-number">Qol {getRouteNumber(project,step.id,routeIndex)}</span>}
+                        <div className="route-row"><label className="field-label">Hədəf addım<select aria-label={`Keçid ${routeIndex+1} hədəfi`} value={route.targetId} onChange={event=>updateStep(step.id,{routes:step.routes.map((item,i)=>i===routeIndex?{...item,targetId:event.target.value}:item)})}><option value="">Addımı seç</option>{project.steps.filter(item=>item.id!==step.id || item.id===route.targetId).map(item=><option key={item.id} value={item.id}>{project.steps.indexOf(item)+1}. {item.title||"Adsız addım"}</option>)}</select></label><button type="button" className="icon-button small-icon" aria-label={`Keçid ${routeIndex+1} sil`} onClick={()=>removeRoute(step.id,routeIndex)}><X size={14}/></button></div>
+                        <label className="field-label">Qısa etiket<input aria-label={`Keçid ${routeIndex+1} şərti`} placeholder={gateway?"Məsələn, Təsdiq / İmtina":"İstəyə bağlı"} maxLength={80} value={route.label} onChange={event=>updateStep(step.id,{routes:step.routes.map((item,i)=>i===routeIndex?{...item,label:event.target.value}:item)})}/></label>
+                        <button type="button" className="text-button" aria-label={`Keçid ${routeIndex+1} izahını aç`} onClick={()=>selectRoute(step.id,routeIndex)}><Pencil size={13}/> {route.description?"İzahı oxu və redaktə et":"Keçidə izah əlavə et"}</button>
                       </div>)}
                     </>}
                   </div>}
@@ -267,8 +344,9 @@ export default function Workspace() {
             <div className="form-intro"><span className="section-label">03 — İZAH</span><h1>Axını nəzərdən keçir.</h1><p>İzahı oxu, əlaqələri yoxla və Visio faylını yüklə.</p></div>
             <div className={`validation-card ${errors.length?"has-errors":""}`}><ShieldCheck size={20}/><div><strong>{errors.length?`${errors.length} düzəliş tələb olunur`:"Struktur yoxlaması tamamlandı"}</strong><p>{errors.length?"Aşağıdakı xətaları düzəlt.":"Biznes qaydalarını da nəzərdən keçir."}</p></div></div>
             {!!issues.length && <details className="validation-details" open={errors.length>0}><summary>Yoxlama qeydləri <span>{issues.length}</span></summary><ul className="issue-list">{issues.map((issue,index)=><li key={index} className={issue.level}><span>{issue.level==="error"?"Xəta":"Qeyd"}</span><button type="button" onClick={()=>{if(issue.stepId){setSelected(issue.stepId);setTab("steps");}else setTab("people");}}>{issue.message}</button></li>)}</ul></details>}
-            <div className="explanation-toolbar"><span>PROSESİN İZAHI</span><button type="button" className="text-button" onClick={exportText}><ArrowDownToLine size={13}/> Mətn yüklə</button></div>
-            <pre className="explanation-text">{explanation}</pre>
+            <div className="explanation-toolbar"><span>WORD CƏDVƏLİ</span><button type="button" className="text-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={13}/> Word cədvəli yüklə</button></div>
+            <button type="button" className="secondary-button word-expand-button" onClick={()=>setModal("table")}><FileText size={14}/> İzah cədvəlinə geniş bax</button>
+            <ExplanationTable project={project} onSelect={(id,index)=>index===undefined?editStep(id):selectRoute(id,index)}/>
           </div>}
         </div>
         <footer className="form-footer">
@@ -279,16 +357,19 @@ export default function Workspace() {
 
       <section className="preview-panel" aria-label="Canlı iş axını">
         <div className="preview-heading"><div className="canvas-title"><span className="live-dot"/><h2 title={project.name||"Yeni iş axını"}>{project.name||"Yeni iş axını"}</h2><span className="live-pill">CANLI</span></div><div className="canvas-stats">{project.pools.length} pool <span>·</span> {lanes.length} lane <span>·</span> {project.steps.length} addım</div></div>
-        <Diagram project={project} selectedId={selected} onSelect={id=>{setSelected(id);setTab("steps");}}/>
+        <div className="canvas-actionbar"><label className="canvas-shape-picker"><span className="sr-only">Yeni fiqurun növü</span><select aria-label="Yeni fiqurun növü" value={newShapeType} onChange={event=>setNewShapeType(event.target.value as StepType)}>{STEP_TYPES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label><button type="button" className="secondary-button" aria-label="Diaqramda fiqur əlavə et" disabled={!ready || project.steps.length>=200} onClick={()=>addStep(newShapeType,true)}><Plus size={14}/> Fiqur əlavə et</button><button type="button" className="text-button" aria-label="Seçilmiş fiquru redaktə et" disabled={!selected} onClick={()=>selected&&editStep(selected)}><Pencil size={14}/><span>Redaktə et</span></button></div>
+        <Diagram project={project} selectedId={selected} selectedRoute={selectedRoute} onSelect={selectStep} onEditStep={editStep} onSelectRoute={selectRoute} onEditRoute={selectRoute} onMoveStep={moveStep} onResetLayout={resetLayout} onConnect={connectSteps} onDeleteStep={deleteStep}>
+          {(inspectorStep || selectedRoute) && <CanvasInspector project={project} stepId={inspectorStep} routeSelection={selectedRoute} onUpdate={updateStep} onDeleteStep={deleteStep} onDeleteRoute={removeRoute} onClose={()=>{setInspectorStep(null);setSelectedRoute(null);}}/>}
+        </Diagram>
       </section>
     </main>
 
     {notice && <div className="toast" role="status"><CircleHelp size={18}/><span>{notice}</span><button type="button" aria-label="Bildirişi bağla" onClick={()=>setNotice("")}><X size={16}/></button></div>}
-    {activeModal && <div className="modal-overlay" onClick={closeModal}><section className="modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={event=>event.stopPropagation()}>
+    {activeModal && <div className="modal-overlay" onClick={closeModal}><section className={`modal ${activeModal==="table"?"word-table-modal":""}`} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={event=>event.stopPropagation()}>
       <button type="button" className="modal-close icon-button" aria-label="Pəncərəni bağla" onClick={closeModal}><X size={18}/></button>
       <span className={`modal-icon ${activeModal==="reset"||activeModal==="unsaved"?"red":""}`}>{activeModal==="reset"?<Trash2 size={24}/>:activeModal==="sample"?<Layers3 size={24}/>:<CircleHelp size={24}/>}</span>
-      <h2 id="modal-title">{activeModal==="reset"?"Hər şeyi silmək istəyirsən?":activeModal==="sample"?"Nümunə prosesi açaq?":activeModal==="unsaved"?"Dəyişikliklər saxlanılmayıb":"Formadan Visio diaqramına"}</h2>
-      {activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Hər addım üçün ad, növ, icraçı və növbəti keçidi seç.</p><p><strong>3. Visio üçün yüklə.</strong> Sağdakı diaqramı izlə, izahı yoxla və .vsdx faylını yüklə.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
+      <h2 id="modal-title">{activeModal==="reset"?"Hər şeyi silmək istəyirsən?":activeModal==="sample"?"Nümunə prosesi açaq?":activeModal==="unsaved"?"Dəyişikliklər saxlanılmayıb":activeModal==="table"?"İş axınının izah cədvəli":"Formadan Visio diaqramına"}</h2>
+      {activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru sürüklə, iki kliklə redaktə et. Seçilmiş fiqurun + tutacağını digər fiqura apararaq onları bağla.</p><p><strong>3. Keçidə izah yaz.</strong> Xəttin etiketinə bas. Qısa etiket və ətraflı izahı açılan paneldə doldur. Bir neçə qol varsa, onların nömrələri Word cədvəlində də eynidir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
         <p>{activeModal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri silinəcək. Bu əməliyyat geri qaytarılmır.":activeModal==="sample"?"Müştəri müraciətləri nümunəsi açılacaq. Saxlanmış layihən öz əvvəlki ünvanında qalacaq.":"Brauzer son dəyişiklikləri saxlaya bilmədi. Hazırkı işi açıq saxlaya və ya dəyişiklikləri itirməyi qəbul edib davam edə bilərsən."}</p>
         <div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Ləğv et</button><button type="button" className={activeModal==="sample"?"primary-button":"danger-button"} onClick={activeModal==="reset"?clearProjects:activeModal==="sample"?sample:()=>{confirmReplacement();setModal(null);}}>{activeModal==="reset"?"Bəli, hər şeyi sil":activeModal==="sample"?"Nümunəni aç":"Saxlamadan davam et"}</button></div>
       </>}

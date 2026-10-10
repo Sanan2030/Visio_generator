@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Download, type Page } from "@playwright/test";
 import JSZip from "jszip";
-import { XMLValidator } from "fast-xml-parser";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
+import { EXPLANATION_HEADERS, explanationRows } from "../lib/docx";
 import type { Project } from "../lib/types";
 
 const STORAGE_PREFIX = "visioflow:v1:";
@@ -74,7 +75,7 @@ test("the dark workspace presents a form beside a large canvas without JSON cont
   await expect(page.getByRole("navigation", { name: "Proses forması" }).getByRole("button")).toHaveCount(3);
   await expect(page.locator("input[type='file']")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /JSON/i })).toHaveCount(0);
-  await expect(page.locator("table")).toHaveCount(0);
+  await expect(page.locator(".form-panel table")).toHaveCount(0);
   const form = await page.getByRole("navigation", { name: "Proses forması" }).boundingBox();
   const canvas = await page.locator(".diagram-viewport").boundingBox();
   expect(canvas!.x).toBeGreaterThan(form!.x + form!.width - 1);
@@ -116,7 +117,8 @@ test("form editing builds a connected live flow and restores every field after r
   await page.getByRole("button", { name: "Son hadisəsi", exact: true }).click();
   await expect(page.locator(".step-card")).toHaveCount(4);
   await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(4);
-  await expect(page.locator("#process-diagram path[stroke-dasharray='6 5']")).toHaveCount(2);
+  await expect(page.getByLabel("4-ci addımın icraçısı", { exact: true }).locator("option:checked")).toHaveText("Tərəfdaş / Bank");
+  await expect(page.locator("#process-diagram path[stroke-dasharray='6 5']")).toHaveCount(1);
   const taskNode = page.locator("#process-diagram").getByRole("button", { name: "İstifadəçi tapşırığı: Sənədi təsdiqlə", exact: true });
   await taskNode.focus();
   await taskNode.press("Enter");
@@ -194,11 +196,23 @@ test("the example downloads editable native Visio shapes and the process explana
   expect(pageXml).toContain("Əsas məlumatları doldur");
   expect(pageXml).toContain("<Connects>");
   expect(pageXml.match(/<Row N="ProjectStepId">/g)).toHaveLength(20);
-  const textDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Mətn yüklə", exact: true }).click();
-  const text = await textDownload;
-  expect(text.suggestedFilename()).toMatch(/\.txt$/);
-  expect((await downloadBytes(text)).toString("utf8")).toBe(await page.locator(".explanation-text").innerText());
+  const wordDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Word cədvəli yüklə", exact: true }).click();
+  const word = await wordDownload;
+  expect(word.suggestedFilename()).toMatch(/\.docx$/);
+  const docx = await JSZip.loadAsync(await downloadBytes(word), { checkCRC32: true });
+  const documentXml = await docx.file("word/document.xml")!.async("string");
+  expect(XMLValidator.validate(documentXml)).toBe(true);
+  const document = new XMLParser({ ignoreAttributes: false, isArray: (name) => ["w:tr", "w:tc"].includes(name) }).parse(documentXml);
+  const rows = document["w:document"]["w:body"]["w:tbl"]["w:tr"];
+  const expectedRows = explanationRows(await savedProject(page));
+  expect(rows).toHaveLength(expectedRows.length + 1);
+  expect(rows.every((row: Record<string, unknown[]>) => row["w:tc"].length === 3)).toBe(true);
+  for (const heading of EXPLANATION_HEADERS) expect(documentXml).toContain(heading);
+  for (const row of expectedRows) expect(documentXml).toContain(row.number);
+  expect(documentXml).toContain("İmtina");
+  expect(documentXml).toContain("Operator");
+  await expect(page.locator(".explanation-text tbody tr")).toHaveCount(expectedRows.length);
 });
 
 test("invalid flows open the review section and block Visio export", async ({ page }) => {

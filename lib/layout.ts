@@ -1,4 +1,6 @@
-import type { LayoutEdge, LayoutLane, LayoutNode, Project, ProjectLayout, StepType } from "./types";
+import { MAX_STEP_POSITION } from "./process";
+import { getRouteNumber } from "./step-numbering";
+import type { LayoutEdge, LayoutLane, LayoutNode, Project, ProjectLayout, Step, StepPosition, StepType } from "./types";
 
 const COLUMN_PITCH = 300;
 const CONTENT_X = 184;
@@ -7,6 +9,17 @@ const ROW_PITCH = 118;
 const POOL_HEADER = 36;
 // The SVG renderer uses a 29px box for two-line route labels.
 const CORRIDOR_PITCH = 36;
+
+export const MIN_NODE_X = CONTENT_X;
+export const MIN_NODE_Y = 16;
+export const MAX_NODE_POSITION = MAX_STEP_POSITION;
+
+/** Keep stored positions in the content area without rounding away pointer movement. */
+export function clampNodePosition(position: StepPosition): StepPosition {
+  const clamp = (value: number, minimum: number) => Math.round(Math.min(MAX_NODE_POSITION,
+    Math.max(minimum, Number.isFinite(value) ? value : minimum)) * 10) / 10;
+  return { x: clamp(position.x, MIN_NODE_X), y: clamp(position.y, MIN_NODE_Y) };
+}
 
 function dimensions(type: StepType): { width: number; height: number } {
   if (type === "start" || type === "end" || type === "intermediate" || type === "message" || type === "timer") return { width: 48, height: 48 };
@@ -56,13 +69,29 @@ function assignColumns(project: Project): Map<string, number> {
 export function layoutProject(project: Project): ProjectLayout {
   const columns = assignColumns(project);
   const columnCount = Math.max(1, ...columns.values()) + (project.steps.length ? 1 : 0);
-  const width = Math.max(960, CONTENT_X + (columnCount - 1) * COLUMN_PITCH + TASK_WIDTH + 56);
+  const nodeGeometry = new Map(project.steps.map(step => {
+    const size = dimensions(step.type);
+    const position = step.position && clampNodePosition(step.position);
+    const x = position?.x ?? CONTENT_X + (columns.get(step.id) || 0) * COLUMN_PITCH + (TASK_WIDTH - size.width) / 2;
+    return [step.id, { ...size, x, relativeY: position?.y }];
+  }));
+  const width = Math.max(960, CONTENT_X + (columnCount - 1) * COLUMN_PITCH + TASK_WIDTH + 56,
+    ...[...nodeGeometry.values()].map(node => node.x + node.width + 56));
+  const directRoute = (source: Step, target: Step) => {
+    const sourceNode = nodeGeometry.get(source.id)!;
+    const targetNode = nodeGeometry.get(target.id)!;
+    // Manual movement can reverse an otherwise adjacent pair. Route based on
+    // the new geometry instead of treating its old automatic column as truth.
+    return targetNode.x - sourceNode.x - sourceNode.width >= 56
+      && (source.position !== undefined || target.position !== undefined
+        || columns.get(target.id) === (columns.get(source.id) ?? 0) + 1);
+  };
   const laneOrder = new Map(project.pools.flatMap(pool => pool.lanes).map((lane, index) => [lane.id, index]));
   const stepIndex = new Map(project.steps.map(step => [step.id, step]));
   const corridorCounts = new Map<string, number>();
   for (const step of project.steps) for (const route of step.routes) {
     const target = stepIndex.get(route.targetId);
-    if (!target || columns.get(target.id) === (columns.get(step.id) ?? 0) + 1) continue;
+    if (!target || directRoute(step, target)) continue;
     const laneId = (laneOrder.get(step.laneId) ?? 0) >= (laneOrder.get(target.laneId) ?? 0) ? step.laneId : target.laneId;
     corridorCounts.set(laneId, (corridorCounts.get(laneId) ?? 0) + 1);
   }
@@ -81,19 +110,26 @@ export function layoutProject(project: Project): ProjectLayout {
         buckets.set(column, [...(buckets.get(column) || []), step]);
       }
       const stackCount = Math.max(1, ...[...buckets.values()].map((bucket) => bucket.length));
-      const laneHeight = Math.max(208, stackCount * ROW_PITCH + 108 + Math.max(0, (corridorCounts.get(lane.id) ?? 0) - 1) * CORRIDOR_PITCH);
-      lanes.push({ id: lane.id, name: lane.name, poolId: pool.id, x: 16, y: laneY, width: width - 32, height: laneHeight });
-      for (const [column, bucket] of buckets) {
+      const laneNodes: LayoutNode[] = [];
+      for (const bucket of buckets.values()) {
         bucket.forEach((step, index) => {
-          const size = dimensions(step.type);
-          nodes.push({
+          const geometry = nodeGeometry.get(step.id)!;
+          laneNodes.push({
             id: step.id,
-            x: CONTENT_X + column * COLUMN_PITCH + (TASK_WIDTH - size.width) / 2,
-            y: laneY + 34 + (stackCount - bucket.length) * ROW_PITCH / 2 + index * ROW_PITCH + (ROW_PITCH - size.height) / 2,
-            ...size,
+            x: geometry.x,
+            y: laneY + (geometry.relativeY ?? 34 + (stackCount - bucket.length) * ROW_PITCH / 2 + index * ROW_PITCH + (ROW_PITCH - geometry.height) / 2),
+            width: geometry.width,
+            height: geometry.height,
           });
         });
       }
+      const corridorCount = corridorCounts.get(lane.id) ?? 0;
+      const nodeBottom = Math.max(0, ...laneNodes.map(node => node.y + node.height - laneY));
+      const corridorSpace = corridorCount ? 56 + (corridorCount - 1) * CORRIDOR_PITCH : 32;
+      const laneHeight = Math.max(208, stackCount * ROW_PITCH + 108 + Math.max(0, corridorCount - 1) * CORRIDOR_PITCH,
+        nodeBottom + corridorSpace);
+      lanes.push({ id: lane.id, name: lane.name, poolId: pool.id, x: 16, y: laneY, width: width - 32, height: laneHeight });
+      nodes.push(...laneNodes);
       laneY += laneHeight;
     }
     const height = Math.max(POOL_HEADER + 96, laneY - poolY);
@@ -130,9 +166,10 @@ export function layoutProject(project: Project): ProjectLayout {
       const sourceColumn = columns.get(step.id) || 0;
       const targetColumn = columns.get(route.targetId) || 0;
       let points: LayoutEdge["points"];
-      if (targetColumn === sourceColumn + 1) {
+      if (directRoute(step, targetStep)) {
         // The column gap provides a clear vertical channel between lane rows.
-        const channelX = CONTENT_X + sourceColumn * COLUMN_PITCH + TASK_WIDTH + 28 + Math.min(routeIndex, 4) * 5;
+        const channelX = (step.position || targetStep.position ? sourceX : CONTENT_X + sourceColumn * COLUMN_PITCH + TASK_WIDTH)
+          + 28 + Math.min(routeIndex, 4) * 5;
         points = [{ x: sourceX, y: sourceY }, { x: channelX, y: sourceY }, { x: channelX, y: targetY }, { x: targetX, y: targetY }];
       } else {
         // Long and backward routes use the clear strip below the lane's nodes.
@@ -140,8 +177,9 @@ export function layoutProject(project: Project): ProjectLayout {
         const useCount = corridorUsage.get(corridorLane.id) || 0;
         corridorUsage.set(corridorLane.id, useCount + 1);
         const corridorY = corridorLane.y + corridorLane.height - 16 - useCount * CORRIDOR_PITCH;
-        const exitX = CONTENT_X + sourceColumn * COLUMN_PITCH + TASK_WIDTH + 28 + (routeIndex % 4) * 4;
-        const entryX = CONTENT_X + targetColumn * COLUMN_PITCH - 18 - (targetIndex % 4) * 4;
+        const manual = step.position !== undefined || targetStep.position !== undefined;
+        const exitX = (manual ? sourceX : CONTENT_X + sourceColumn * COLUMN_PITCH + TASK_WIDTH) + 28 + (routeIndex % 4) * 4;
+        const entryX = (manual ? targetX : CONTENT_X + targetColumn * COLUMN_PITCH) - 18 - (targetIndex % 4) * 4;
         points = [
           { x: sourceX, y: sourceY },
           { x: exitX, y: sourceY },
@@ -153,7 +191,9 @@ export function layoutProject(project: Project): ProjectLayout {
       }
       // Adjacent identical points needlessly complicate exported connectors.
       points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
-      edges.push({ sourceId: step.id, targetId: route.targetId, label: route.label, points, message: sourceLane.poolId !== targetLane.poolId });
+      edges.push({ sourceId: step.id, targetId: route.targetId, routeIndex,
+        ...(step.routes.length > 1 ? { branchNumber: getRouteNumber(project, step.id, routeIndex) } : {}),
+        label: route.label, points, message: sourceLane.poolId !== targetLane.poolId });
     });
   }
   return { width, height: Math.max(240, poolY), pools, lanes, nodes, edges };

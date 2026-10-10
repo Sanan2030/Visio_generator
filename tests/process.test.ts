@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createProject, explainProject, isProject, SAMPLE_PROJECT, validateProject } from "../lib/process";
-import { layoutProject } from "../lib/layout";
+import { clampNodePosition, layoutProject, MAX_NODE_POSITION, MIN_NODE_X, MIN_NODE_Y } from "../lib/layout";
+import { getRouteNumber } from "../lib/step-numbering";
 import type { Project } from "../lib/types";
 
 function simpleProject(): Project {
@@ -195,4 +196,106 @@ test("cross-pool edges are message flows, empty projects and dangling links are 
   assert.equal(layoutProject(createProject()).nodes.length, 0);
   project.steps[0].routes.push({ targetId: "missing", label: "" });
   assert.doesNotThrow(() => layoutProject(project));
+});
+
+test("manual positions and separate route explanations persist in old-version drafts with bounded coordinates", () => {
+  const project = simpleProject();
+  project.steps[1].position = { x: 1200.5, y: 300.2 };
+  project.steps[1].routes[0].description = "Operator sənədi təsdiqləyir.\nQNV yenilənir.";
+  const restored: unknown = JSON.parse(JSON.stringify(project));
+  assert.equal(isProject(restored), true);
+  if (!isProject(restored)) throw new Error("Manually positioned draft should be restorable");
+  assert.deepEqual(restored.steps[1].position, project.steps[1].position);
+  assert.match(explainProject(restored), /Operator sənədi təsdiqləyir\.\nQNV yenilənir\./);
+  assert.equal(isProject(simpleProject()), true, "drafts before manual editing remain compatible");
+  for (const position of [null, [], { x: -1, y: 10 }, { x: 10, y: -1 }, { x: Infinity, y: 0 },
+    { x: 0, y: NaN }, { x: MAX_NODE_POSITION + 1, y: 0 }, { x: "200", y: 20 }, { x: 200 }]) {
+    const invalid = { ...project, steps: [{ ...project.steps[1], position }] };
+    assert.equal(isProject(invalid), false, `invalid position ${JSON.stringify(position)} is rejected`);
+  }
+  project.steps[1].routes[0].description = "x".repeat(10001);
+  assert.equal(isProject(project), false);
+  project.steps[1].routes[0].description = "x".repeat(10000);
+  assert.equal(isProject(project), true);
+  assert.deepEqual(clampNodePosition({ x: -20, y: -20 }), { x: MIN_NODE_X, y: MIN_NODE_Y });
+  assert.deepEqual(clampNodePosition({ x: Infinity, y: NaN }), { x: MIN_NODE_X, y: MIN_NODE_Y });
+  assert.deepEqual(clampNodePosition({ x: MAX_NODE_POSITION + 50, y: 20.27 }), { x: MAX_NODE_POSITION, y: 20.3 });
+});
+
+test("manual positions grow the page and retain lane-relative coordinates after pool and role changes", () => {
+  const project = simpleProject();
+  project.steps[1].position = { x: 1800.2, y: 340.4 };
+  const first = layoutProject(project);
+  const firstNode = first.nodes.find(node => node.id === "work")!;
+  const firstLane = first.lanes.find(lane => lane.id === "lane")!;
+  assert.equal(firstNode.x, 1800.2);
+  assert.ok(Math.abs(firstNode.y - firstLane.y - 340.4) < 0.00001);
+  assert.ok(first.width > firstNode.x + firstNode.width + 30);
+  assert.ok(firstLane.y + firstLane.height > firstNode.y + firstNode.height + 30);
+  project.pools.unshift({ id: "external-pool", name: "Yeni təşkilat", lanes: [{ id: "external-lane", name: "Yeni icraçı" }] });
+  project.pools[1].lanes[0].name = "Yeni Operator adı";
+  const renamed = layoutProject(project);
+  const renamedNode = renamed.nodes.find(node => node.id === "work")!;
+  const renamedLane = renamed.lanes.find(lane => lane.id === "lane")!;
+  assert.equal(renamedNode.x, firstNode.x);
+  assert.ok(renamedNode.y > firstNode.y, "added pool moves its lane downward");
+  assert.ok(Math.abs(renamedNode.y - renamedLane.y - 340.4) < 0.00001);
+  project.steps[1].laneId = "external-lane";
+  const reassigned = layoutProject(project);
+  const reassignedNode = reassigned.nodes.find(node => node.id === "work")!;
+  const reassignedLane = reassigned.lanes.find(lane => lane.id === "external-lane")!;
+  assert.equal(reassignedNode.x, firstNode.x);
+  assert.ok(Math.abs(reassignedNode.y - reassignedLane.y - 340.4) < 0.00001);
+  assert.deepEqual(project.steps[1].position, { x: 1800.2, y: 340.4 }, "layout never mutates the draft");
+});
+
+test("manually reversed and self-loop connections stay attached, orthogonal and below occupied lane content", () => {
+  const project = simpleProject();
+  project.steps[0].position = { x: 1700, y: 80 };
+  project.steps[1].position = { x: 1200, y: 420 };
+  project.steps[2].position = { x: 500, y: 210 };
+  project.steps[1].routes.push({ targetId: "work", label: "Təkrar" });
+  const layout = layoutProject(project);
+  const nodes = new Map(layout.nodes.map(node => [node.id, node]));
+  const contentBottom = Math.max(...layout.nodes.map(node => node.y + node.height));
+  const corridors: number[] = [];
+  for (const edge of layout.edges) {
+    const source = nodes.get(edge.sourceId)!;
+    const target = nodes.get(edge.targetId)!;
+    assert.equal(edge.points.length, 6);
+    assert.equal(edge.points[0].x, source.x + source.width);
+    assert.equal(edge.points.at(-1)!.x, target.x);
+    assert.ok(edge.points[0].y > source.y && edge.points[0].y < source.y + source.height);
+    assert.ok(edge.points.at(-1)!.y > target.y && edge.points.at(-1)!.y < target.y + target.height);
+    const corridorY = edge.points[2].y;
+    assert.ok(corridorY > contentBottom + 30);
+    corridors.push(corridorY);
+    edge.points.forEach((point, index) => {
+      assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
+      assert.ok(point.x >= 0 && point.x <= layout.width && point.y >= 0 && point.y <= layout.height);
+      if (index) assert.ok(point.x === edge.points[index - 1].x || point.y === edge.points[index - 1].y);
+    });
+  }
+  assert.equal(new Set(corridors).size, layout.edges.length);
+  project.steps[2].position = { x: 2200, y: 210 };
+  const movedForward = layoutProject(project).edges.find(edge => edge.sourceId === "work" && edge.targetId === "end")!;
+  assert.ok(movedForward.points.length <= 4, "moved target is routed through its current forward gap");
+  assert.equal(movedForward.points[1].x, nodes.get("work")!.x + nodes.get("work")!.width + 28);
+});
+
+test("branch numbering uses table order and route identity consistently with the Word explanation", () => {
+  const project = simpleProject();
+  project.steps[1].routes.push({ targetId: "start", label: "Təkrar", description: "Yenidən yoxlamaya göndərilir." });
+  const layout = layoutProject(project);
+  const branches = layout.edges.filter(edge => edge.sourceId === "work");
+  assert.deepEqual(branches.map(edge => edge.branchNumber), ["2.1", "2.2"]);
+  for (const edge of branches) {
+    assert.equal(edge.branchNumber, getRouteNumber(project, edge.sourceId, edge.routeIndex));
+    assert.equal(edge.label, project.steps[1].routes[edge.routeIndex].label);
+  }
+  assert.equal(layout.edges.find(edge => edge.sourceId === "start")!.branchNumber, undefined);
+  project.steps.reverse();
+  assert.deepEqual(layoutProject(project).edges.filter(edge => edge.sourceId === "work").map(edge => edge.branchNumber), ["2.1", "2.2"]);
+  project.steps.unshift(project.steps.pop()!);
+  assert.deepEqual(layoutProject(project).edges.filter(edge => edge.sourceId === "work").map(edge => edge.branchNumber), ["3.1", "3.2"]);
 });

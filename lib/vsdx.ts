@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { layoutProject } from "./layout";
 import { isProject } from "./process";
+import { displayRouteLabel, getStepNumber } from "./step-numbering";
 import type { LayoutEdge, LayoutNode, LayoutPoint, Project, Step } from "./types";
 
 const VISIO_NS = "http://schemas.microsoft.com/office/visio/2012/main";
@@ -96,7 +97,7 @@ function properties(step: Step): string {
   return `<Section N="Property">${Object.entries(values).map(([key, value]) => `<Row N="${key}">${cell("Label", key)}${cell("Type", 0)}${cell("Value", value)}</Row>`).join("")}</Section>`;
 }
 
-function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number, anchors: RelativePoint[]): string {
+function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number, anchors: RelativePoint[], displayText = step.title): string {
   const width = node.width / PIXELS_PER_INCH;
   const height = node.height / PIXELS_PER_INCH;
   let geometry = rectangle(width, height);
@@ -160,7 +161,7 @@ function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number,
   } else if (step.type === "userTask") {
     fill = "#F0FAF7";
   }
-  return nativeShape({ id, name: step.title, rect: node, pageHeight, geometry, text: step.title, fill, fillPattern: step.type === "annotation" ? 0 : 1, line, cells, fontSize, lineWidth, sections: connectionPoints(width, height, anchors) + properties(step) });
+  return nativeShape({ id, name: step.title, rect: node, pageHeight, geometry, text: displayText, fill, fillPattern: step.type === "annotation" ? 0 : 1, line, cells, fontSize, lineWidth, sections: connectionPoints(width, height, anchors) + properties(step) });
 }
 
 function nearestAnchor(node: LayoutNode, point: LayoutPoint, anchors: RelativePoint[]): number {
@@ -298,7 +299,7 @@ export async function generateVsdx(project: Project): Promise<Uint8Array> {
     if (!step) continue;
     const id = nextId++;
     shapeIds.set(step.id, id);
-    shapes.push(nodeShape(step, node, id, layout.height, anchorsByNode.get(node.id)!));
+    shapes.push(nodeShape(step, node, id, layout.height, anchorsByNode.get(node.id)!, `${getStepNumber(project, step.id)}. ${step.title}`));
   }
   for (const edge of layout.edges) {
     const sourceId = shapeIds.get(edge.sourceId);
@@ -308,7 +309,7 @@ export async function generateVsdx(project: Project): Promise<Uint8Array> {
     if (!sourceId || !targetId || !source || !target || edge.points.length < 2) continue;
     const association = [steps.get(edge.sourceId)?.type, steps.get(edge.targetId)?.type]
       .some((type) => type === "data" || type === "annotation");
-    const connector = connectorShape(edge, nextId++, sourceId, targetId, source, target, layout.height, association, (steps.get(edge.sourceId)?.routes.length ?? 0) > 1, anchorsByNode.get(edge.sourceId)!, anchorsByNode.get(edge.targetId)!);
+    const connector = connectorShape({ ...edge, label: displayRouteLabel(project, edge.sourceId, edge.routeIndex) }, nextId++, sourceId, targetId, source, target, layout.height, association, (steps.get(edge.sourceId)?.routes.length ?? 0) > 1, anchorsByNode.get(edge.sourceId)!, anchorsByNode.get(edge.targetId)!);
     shapes.push(connector.shape);
     connections.push(connector.connects);
   }

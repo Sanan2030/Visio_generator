@@ -6,9 +6,11 @@ Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevi
 
 1. **İştirakçılar** formasında prosesin adını və pool sayını daxil et. Hər pool iştirakçı təşkilatı/tərəfi, daxilindəki lane-lər isə icraçı rollarını göstərir.
 2. **Addımlar** bölməsində başlanğıc, tapşırıqlar və son hadisəsi əlavə et. Hər addımın kartını açaraq adını, element növünü, icraçısını və istəyə bağlı iş təsvirini doldur. Bir anda bir addımın forması açıq olur.
-3. Addımın hədəfini və keçid şərtini seç. XOR bir yol, OR bir və ya bir neçə uyğun yol, AND isə bütün paralel yollar üçündür. Əvvəlki addımlara qayıtmaq və bir neçə qol yaratmaq mümkündür.
-4. Sağdakı canlı diaqram dəyişiklikləri dərhal göstərir və ilkin olaraq bütün axını ekrana sığdırır. Elementə kliklə və ya klaviatura ilə seçərək onun formasını aç. Böyütmə, kiçiltmə, sürüşdürmə və tam ekran rejimi var.
-5. **İzah** bölməsində əlaqələri yoxla. **Visio üçün yüklə** düyməsi redaktə olunan `.vsdx` faylı yaradır. İzahı ayrıca **Mətn yüklə** ilə əldə etmək olar.
+3. Addımın hədəfini və keçid şərtini seç. XOR bir yol, OR bir və ya bir neçə uyğun yol, AND isə bütün paralel yollar üçündür. Bir addımdan bir neçə qol çıxanda onların nömrələri `4.1`, `4.2` kimi göstərilir. Kiçik xətt etiketinə basaraq qısa mətni və ayrıca ətraflı izahı redaktə et.
+4. Sağdakı diaqramda fiquru öz lane-i daxilində sürüklə. Oxlar ona bağlı qalır; yerləşmə hash ünvanındakı layihə ilə birlikdə saxlanılır və Visio ixracında qorunur. Fiqura iki dəfə kliklə kompakt redaktə panelini aç. Seçilmiş fiqurun **+** tutacağını başqa fiqura apararaq keçid yarat; tutacağa və sonra hədəfə klikləmək də mümkündür.
+5. **İzah** bölməsində üçsütunlu cədvələ bax və **Word cədvəli yüklə** ilə redaktə olunan `.docx` sənədini əldə et. Sütunlar **Addımın sıra N-si**, **İcraçı**, **Addımların təsviri** şəklindədir; qol nömrələri diaqramdakılarla eynidir. **Visio üçün yüklə** isə redaktə olunan `.vsdx` faylı yaradır.
+
+Fokus fiqurda olduqda ox düymələri onu 1 vahid, Shift + ox isə 10 vahid hərəkət etdirir; F2 redaktə panelini açır, Delete fiquru silir. Sürüşdürmə zamanı Esc hərəkəti ləğv edir. Fokus diaqram sahəsində olduqda oxlar sahəni sürüşdürür. **Avtomatik düz** əl ilə yerləşdirməni sıfırlayır; **Geri al** ilə bərpa etmək olar. Böyütmə, ekrana sığdırma və tam ekran rejimində redaktə də mümkündür.
 
 ## İlk versiyada olanlar
 
@@ -17,7 +19,8 @@ Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevi
 - Eyni pool daxilində ardıcıl axın, pool-lar arasında mesaj axını, sənəd/qeyd üçün nöqtəli əlaqə.
 - Struktura əsaslanan Azərbaycan dilində izah; əlaqəsiz addımlar, olmayan hədəflər, başlanğıc/son və qərar şərtləri barədə yoxlama.
 - İstifadəçinin verdiyi “Müştəri müraciətləri” nümunəsi: operator, vizaçı, aidiyyəti şəxslər, icraçılar, imtina/düzəliş dövrü, paralel ünvanlanma və QNV statusları. İmzalama nümunədə Vizaçı lane-indədir; ayrıca rol əlavə edib dəyişmək olar.
-- Visio-da ayrı-ayrı seçilib redaktə olunan fiqurlarla **.vsdx** ixracı və izah üçün **.txt** yükləmə.
+- Visio-da ayrı-ayrı seçilib redaktə olunan fiqurlarla **.vsdx** ixracı və izah üçün redaktə olunan **.docx** Word cədvəli.
+- Fiqurların sürüklənməsi, diaqramdan ad/növ/icraçı/təsvir redaktəsi, keçid yaratmaq və silmək, uzun keçid izahları və ortaq qol nömrələri.
 - Hesabsız istifadə, brauzerdə dərhal avtomatik yadda saxlama, son 30 dəyişikliyi geri alma və təsdiqli **Hər şeyi sil**.
 - Dar ekranlarda formanın altında ayrıca sürüşdürülən diaqram; tam ekran rejimi ilə axına geniş baxış.
 
@@ -51,6 +54,14 @@ npm start
 ```
 
 Unit testlər proses qaydalarını, dövrlərin yerləşməsini, saxlanmış layihənin strukturunu və VSDX ZIP/XML paketini yoxlayır. Brauzer testləri forma redaktəsi, dərhal bərpa, hash sıfırlama, yaddaş nasazlığı, təsdiqli silmə, Visio ixracı və mobil diaqram idarəsini yoxlayır. E2E testi `CHROMIUM_PATH` verilərsə onu, yoxdursa `/usr/bin/chromium` mövcud olduqda sistem Chromium-unu istifadə edir. Digər maşında `npx playwright install chromium` ilə brauzeri quraşdır.
+
+Word sənədi ayrıca Office Open XML paketidir; həqiqi cədvəl, təkrarlanan başlıq və Azərbaycan hərfləri saxlanılır. Əlavə paket tələb olunmur. Word/VSDX struktur testlərindən başqa sürüklənən mövqelərin bərpası, native Visio koordinatları, bağlı oxlar və qol nömrələri də yoxlanılır.
+
+## İnterfeys nümunələri
+
+`/designs` səhifəsində üç qaranlıq interfeys variantına baxmaq olar: **A — Addım-addım forma**, **B — Diaqram mərkəzdə**, **C — Cədvəldən diaqrama**. Bunlar görünüşü müqayisə etmək üçündür; səhifə mövcud layihəni dəyişmir. İşlək redaktor ana səhifədədir. Nümunələrdə fiqur və kiçik keçid etiketini seçərək panel görünüşünü də müqayisə etmək olar.
+
+Redaktə davranışı üçün yoxlanmış rəsmi açıq mənbə nümunələri: [draw.io mətn redaktəsi](https://github.com/jgraph/drawio/blob/dev/src/main/webapp/js/grapheditor/Graph.js), [bpmn-js iki kliklə redaktə](https://github.com/bpmn-io/bpmn-js/blob/develop/lib/features/label-editing/LabelEditingProvider.js), [diagram-js fiqur hərəkəti](https://github.com/bpmn-io/diagram-js/blob/develop/lib/features/move/Move.js), [Excalidraw imkanları](https://github.com/excalidraw/excalidraw#features).
 
 ## Vercel
 
@@ -86,4 +97,4 @@ VSDX native fiqurlar, Unicode mətn və əlaqəli birləşdiricilərdən ibarət
 
 **Sloth AI hazırda qoşulmayıb.** İstifadə yeri və API müqaviləsi dəqiqləşəndən sonra inteqrasiya ayrıca əlavə edilə bilər. Hazırkı izah xarici AI çağırışı etmədən, formaya daxil edilən məlumatlardan qaydalar əsasında hazırlanır.
 
-Bir layihədə maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element mümkündür. Natamam addımlar da avtomatik saxlanılır; Visio faylını yükləmək üçün struktur xətaları düzəldilməlidir. Brauzerin yerli yaddaş tutumu ayrıca məhdudiyyət yaradır. Elementləri tətbiqdə sürükləyərək yerini dəyişmək funksiyası yoxdur; yerləşmə avtomatik hesablanır, əl ilə düzəlişləri Visio-da etmək olar.
+Bir layihədə maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element mümkündür. Natamam addımlar da avtomatik saxlanılır; Visio faylını yükləmək üçün struktur xətaları düzəldilməlidir. Brauzerin yerli yaddaş tutumu ayrıca məhdudiyyət yaradır. Fiqur öz lane-i daxilində sürüklənir; başqa lane-ə keçirmək üçün redaktə panelində icraçını dəyiş. Pool/lane ölçüləri avtomatik hesablanır, onların sərbəst sürüklənməsi və fiqurların ölçüsünü əl ilə dəyişmək bu versiyaya daxil deyil.

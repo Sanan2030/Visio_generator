@@ -17,6 +17,13 @@ export type StepType =
 export interface Route {
   targetId: string;
   label: string;
+  description?: string;
+}
+
+export interface StepPosition {
+  /** Absolute diagram x; y is the top offset within the assigned lane. */
+  x: number;
+  y: number;
 }
 
 export interface Step {
@@ -26,6 +33,7 @@ export interface Step {
   title: string;
   description: string;
   routes: Route[];
+  position?: StepPosition;
 }
 
 export interface Lane {
@@ -69,6 +77,8 @@ export interface LayoutNode {
 export interface LayoutEdge {
   sourceId: string;
   targetId: string;
+  routeIndex: number;
+  branchNumber?: string;
   label: string;
   points: LayoutPoint[];
   message: boolean;

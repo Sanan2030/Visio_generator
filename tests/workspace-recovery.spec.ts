@@ -111,7 +111,7 @@ test("failed reset preserves the current draft, hash and saved content", async (
   await page.evaluate(() => { Storage.prototype.removeItem = () => { throw new DOMException("Blocked", "SecurityError"); }; });
   await openReset(page);
   await page.getByRole("button", { name: "Bəli, hər şeyi sil", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Hazırkı layihə açıq saxlanıldı.");
+  await expect(page.locator(".toast")).toContainText("Hazırkı layihə açıq saxlanıldı.");
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Silinməyən layihə");
   expect(page.url()).toBe(originalUrl);
   await page.reload();
@@ -127,7 +127,7 @@ test("failed reset and writes do not warn on unload when the saved snapshot stil
   });
   await openReset(page);
   await page.getByRole("button", { name: "Bəli, hər şeyi sil", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Hazırkı layihə açıq saxlanıldı.");
+  await expect(page.locator(".toast")).toContainText("Hazırkı layihə açıq saxlanıldı.");
   expect(await unloadIsBlocked(page)).toBe(false);
   const name = await page.evaluate(() => JSON.parse(localStorage.getItem("visioflow:v1:" + location.hash.slice(1))!).name);
   expect(name).toBe("Yaddaşda qalan layihə");

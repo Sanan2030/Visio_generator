@@ -21,6 +21,8 @@ const TYPES = new Set<string>(STEP_TYPES.map((type) => type.value));
 const ARTIFACT_TYPES = new Set<StepType>(["data", "annotation"]);
 const GATEWAY_TYPES = new Set<StepType>(["xor", "or", "and"]);
 
+export const MAX_STEP_POSITION = 100000;
+
 export function createId(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -118,9 +120,15 @@ export function isProject(input: unknown): input is Project {
     if (!record(step) || !addId(step.id) || !idValue(step.laneId) || typeof step.type !== "string" || !TYPES.has(step.type)
       || !textValue(step.title, 500) || !textValue(step.description, 20000)
       || !Array.isArray(step.routes) || step.routes.length > 200) return false;
+    if (step.position !== undefined && (!record(step.position)
+      || typeof step.position.x !== "number" || !Number.isFinite(step.position.x)
+      || typeof step.position.y !== "number" || !Number.isFinite(step.position.y)
+      || step.position.x < 0 || step.position.y < 0
+      || step.position.x > MAX_STEP_POSITION || step.position.y > MAX_STEP_POSITION)) return false;
     for (const route of step.routes) {
       // A cleared destination is an unfinished draft, not a corrupt project.
-      if (!record(route) || (route.targetId !== "" && !idValue(route.targetId)) || !textValue(route.label, 500)) return false;
+      if (!record(route) || (route.targetId !== "" && !idValue(route.targetId)) || !textValue(route.label, 500)
+        || (route.description !== undefined && !textValue(route.description, 10000))) return false;
     }
   }
   return true;
@@ -247,6 +255,7 @@ export function explainProject(project: Project): string {
       const targetName = target?.title || (target ? "Adsız addım" : "Mövcud olmayan addım");
       const attachment = ARTIFACT_TYPES.has(step.type) || (target && ARTIFACT_TYPES.has(target.type));
       lines.push(`${attachment ? "Əlaqə" : "Keçid"}: ${route.label.trim() ? `${route.label.trim()} → ` : ""}${targetName}.`);
+      if (route.description?.trim()) lines.push(route.description.trim());
     }
   });
   const issues = validateProject(project);

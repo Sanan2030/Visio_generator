@@ -7,7 +7,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "VisioFlow — İş axınını vizuallaşdır",
-  description: "Cədvəldən canlı proses diaqramı. Pool, lane, XOR, OR və AND keçidləri ilə iş axınını qur və Visio üçün yüklə.",
+  description: "Canlı iş axını redaktoru. Fiqurları sürüklə, keçidlərə izah yaz, diaqramı Visio və izah cədvəlini Word üçün yüklə.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

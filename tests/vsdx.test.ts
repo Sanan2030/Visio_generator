@@ -11,6 +11,21 @@ import type { Project, StepType } from "../lib/types";
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@", parseAttributeValue: false, parseTagValue: false, htmlEntities: true });
 const STEP_TYPES: StepType[] = ["start", "task", "userTask", "serviceTask", "subprocess", "xor", "or", "and", "intermediate", "message", "timer", "data", "annotation", "end"];
 
+test("native Visio branch captions retain shared numbers without changing shape identities", async () => {
+  const project = fixture();
+  project.steps[5].routes = [
+    { targetId: project.steps[6].id, label: "Təsdiq" },
+    { targetId: project.steps[7].id, label: "İmtina" },
+    { targetId: project.steps[8].id, label: "Əlavə yoxlama" },
+  ];
+  const zip = await JSZip.loadAsync(await generateVsdx(project));
+  const xml = await zip.file("visio/pages/page1.xml")!.async("string");
+  assert.equal(XMLValidator.validate(xml), true);
+  assert.ok(xml.includes('Name="xor addımı"'));
+  assert.ok(xml.includes("6. xor addımı"));
+  for (const caption of ["6.1 · Təsdiq", "6.2 · İmtina", "6.3 · Əlavə yoxlama"]) assert.ok(xml.includes(caption));
+});
+
 function fixture(): Project {
   return {
     version: 1,
@@ -431,4 +446,41 @@ test("self-loop geometry keeps finite editable coordinates and both ends on the 
     assert.ok(Math.abs(pageX * 96 - layout.edges[index].points[pointIndex].x) < 0.002);
     assert.ok(Math.abs(layout.height - pageY * 96 - layout.edges[index].points[pointIndex].y) < 0.002);
   }
+});
+
+test("manual canvas positions are exported as editable Visio coordinates with attached rerouted connectors", async () => {
+  const project = fixture();
+  project.steps[0].position = { x: 1750, y: 38 };
+  project.steps[1].position = { x: 750, y: 430 };
+  project.steps[2].position = { x: 2950, y: 1500 };
+  project.steps.at(-1)!.position = { x: 6400, y: 720 };
+  const layout = layoutProject(project);
+  const zip = await JSZip.loadAsync(await generateVsdx(project));
+  const { shapes, connects } = await getPage(zip);
+  for (const step of project.steps.filter(step => step.position)) {
+    const node = layout.nodes.find(candidate => candidate.id === step.id)!;
+    const shape = shapes.find(candidate => array(candidate.Section).some(section => section["@N"] === "Property"
+      && array(section.Row).some(row => row["@N"] === "ProjectStepId"
+        && array(row.Cell).some(value => value["@N"] === "Value" && value["@V"] === step.id))))!;
+    assert.ok(shape, "manual node remains a native editable shape");
+    const values = numericScope(shape);
+    assert.ok(Math.abs(values.PinX * 96 - node.x - node.width / 2) < 0.0001);
+    assert.ok(Math.abs(layout.height - values.PinY * 96 - node.y - node.height / 2) < 0.0001);
+  }
+  const connectors = shapes.filter(shape => shape["@NameU"].startsWith("Connector."));
+  for (const [index, edge] of layout.edges.entries()) {
+    const connector = connectors[index];
+    const values = numericScope(connector);
+    const first = edge.points[0];
+    const last = edge.points.at(-1)!;
+    assert.ok(Math.abs(values.BeginX * 96 - first.x) < 0.0001);
+    assert.ok(Math.abs(layout.height - values.BeginY * 96 - first.y) < 0.0001);
+    assert.ok(Math.abs(values.EndX * 96 - last.x) < 0.0001);
+    assert.ok(Math.abs(layout.height - values.EndY * 96 - last.y) < 0.0001);
+    assert.equal(connects.filter(connection => connection["@FromSheet"] === connector["@ID"]).length, 2);
+  }
+  const pages = parser.parse(await zip.file("visio/pages/pages.xml")!.async("string")).Pages;
+  const dimensions = new Map(array<XmlCell>(pages.Page.PageSheet.Cell).map(value => [value["@N"], Number(value["@V"])]));
+  assert.ok(Math.abs(dimensions.get("PageWidth")! * 96 - layout.width) < 0.0001);
+  assert.ok(Math.abs(dimensions.get("PageHeight")! * 96 - layout.height) < 0.0001);
 });
