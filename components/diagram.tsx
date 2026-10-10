@@ -23,6 +23,9 @@ const buttonStyle: CSSProperties = {
   border: "1px solid #e3e9ee", borderRadius: 7, background: "#fff", color: "#647180", cursor: "pointer",
 };
 
+const MIN_MANUAL_ZOOM = 0.1;
+const MAX_ZOOM = 1.8;
+
 function wrapText(value: string, length: number, maxLines = 4) {
   const words = value.trim().split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -71,30 +74,89 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
   const stepById = useMemo(() => new Map(project.steps.map((step) => [step.id, step])), [project.steps]);
   const viewport = useRef<HTMLDivElement>(null);
   const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const previousProject = useRef(project.id);
+  const fittedProject = useRef<string | null>(null);
+  const previousSelection = useRef("");
+  const pendingScroll = useRef<{ left: number; top: number } | null>(null);
   const [zoom, setZoom] = useState(0.8);
+  const [fitted, setFitted] = useState(false);
   const [panning, setPanning] = useState(false);
   const markerPrefix = useId().replace(/:/g, "");
   const diagramWidth = Math.max(560, layout.width);
   const diagramHeight = Math.max(360, layout.height);
 
   useEffect(() => {
-    if (!selectedId || !viewport.current) return;
+    if (previousProject.current === project.id) return;
+    previousProject.current = project.id;
+    previousSelection.current = "";
+    pendingScroll.current = null;
+    pan.current = null;
+    fittedProject.current = null;
+    setPanning(false);
+    setFitted(false);
+    setZoom(0.8);
+    viewport.current?.scrollTo({ left: 0, top: 0 });
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!selectedId || !viewport.current) { previousSelection.current = ""; return; }
     const node = layout.nodes.find((item) => item.id === selectedId);
     if (!node) return;
+    const selection = `${project.id}:${node.id}:${node.x}:${node.y}:${node.width}:${node.height}`;
+    // Deliberate panning and zooming should not jump back to an unchanged selection.
+    if (previousSelection.current === selection) return;
+    previousSelection.current = selection;
     const view = viewport.current;
     const left = (node.x + node.width / 2) * zoom + 24;
     const top = (node.y + node.height / 2) * zoom + 24;
     if (left < view.scrollLeft + 50 || left > view.scrollLeft + view.clientWidth - 50 || top < view.scrollTop + 40 || top > view.scrollTop + view.clientHeight - 40) {
       view.scrollTo({ left: Math.max(0, left - view.clientWidth / 2), top: Math.max(0, top - view.clientHeight / 2), behavior: "smooth" });
     }
-  }, [selectedId, layout.nodes, zoom]);
+  }, [project.id, selectedId, layout.nodes, zoom]);
 
-  function changeZoom(next: number) { setZoom(Math.max(0.15, Math.min(1.8, Math.round(next * 100) / 100))); }
+  useEffect(() => {
+    if (pendingScroll.current && viewport.current) viewport.current.scrollTo(pendingScroll.current);
+    pendingScroll.current = null;
+  }, [zoom]);
+
+  useEffect(() => {
+    const view = viewport.current;
+    if (!fitted || !view || fittedProject.current !== project.id) return;
+    const updateFit = () => {
+      // Fit uses the exact ratio: rounding or a manual zoom floor clips large flows.
+      const availableWidth = Math.max(1, view.clientWidth - 48);
+      const availableHeight = Math.max(1, view.clientHeight - 48);
+      setZoom(Math.min(availableWidth / diagramWidth, availableHeight / diagramHeight, 1));
+      view.scrollTo({ left: 0, top: 0 });
+    };
+    updateFit();
+    const observer = new ResizeObserver(updateFit);
+    observer.observe(view);
+    return () => observer.disconnect();
+  }, [project.id, fitted, diagramWidth, diagramHeight]);
+
+  function changeZoom(next: number) {
+    const nextZoom = Math.max(MIN_MANUAL_ZOOM, Math.min(MAX_ZOOM, Math.round(next * 100) / 100));
+    const view = viewport.current;
+    if (view) {
+      const scale = nextZoom / zoom;
+      pendingScroll.current = {
+        left: Math.max(0, (view.scrollLeft + view.clientWidth / 2 - 24) * scale + 24 - view.clientWidth / 2),
+        top: Math.max(0, (view.scrollTop + view.clientHeight / 2 - 24) * scale + 24 - view.clientHeight / 2),
+      };
+    }
+    fittedProject.current = null;
+    setFitted(false);
+    setZoom(nextZoom);
+  }
   function fit() {
     const view = viewport.current;
     if (!view) return;
-    changeZoom(Math.min((view.clientWidth - 48) / diagramWidth, (view.clientHeight - 48) / diagramHeight, 1));
-    view.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+    pendingScroll.current = null;
+    fittedProject.current = project.id;
+    setFitted(true);
+    setZoom(Math.min(Math.max(1, view.clientWidth - 48) / diagramWidth, Math.max(1, view.clientHeight - 48) / diagramHeight, 1));
+    view.scrollTo({ left: 0, top: 0 });
   }
 
   return <div className="diagram-panel" style={{ display: "flex", flexDirection: "column", height: 510, minHeight: 440 }}>
@@ -106,16 +168,16 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
         <span>{project.steps.length} addım</span>
       </div>
       <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-        <button type="button" className="diagram-control" style={buttonStyle} aria-label="Diaqramı kiçilt" title="Kiçilt" onClick={() => changeZoom(zoom - 0.1)} disabled={zoom <= 0.15}><Minus size={15} /></button>
-        <span aria-live="polite" style={{ minWidth: 43, textAlign: "center", fontSize: 11, fontWeight: 600, color: "#697887" }}>{Math.round(zoom * 100)}%</span>
-        <button type="button" className="diagram-control" style={buttonStyle} aria-label="Diaqramı böyüt" title="Böyüt" onClick={() => changeZoom(zoom + 0.1)} disabled={zoom >= 1.8}><Plus size={15} /></button>
+        <button type="button" className="diagram-control" style={buttonStyle} aria-label="Diaqramı kiçilt" title="Kiçilt" onClick={() => changeZoom(zoom - 0.1)} disabled={zoom <= MIN_MANUAL_ZOOM}><Minus size={15} /></button>
+        <span aria-live="polite" style={{ minWidth: 43, textAlign: "center", fontSize: 11, fontWeight: 600, color: "#697887" }}>{zoom < 0.1 ? Math.round(zoom * 1000) / 10 : Math.round(zoom * 100)}%</span>
+        <button type="button" className="diagram-control" style={buttonStyle} aria-label="Diaqramı böyüt" title="Böyüt" onClick={() => changeZoom(zoom + 0.1)} disabled={zoom >= MAX_ZOOM}><Plus size={15} /></button>
         <div style={{ width: 1, height: 20, background: "#e9eef2", margin: "0 5px" }} />
         <button type="button" className="diagram-control" style={buttonStyle} aria-label="Bütün diaqramı ekrana sığdır" title="Ekrana sığdır" onClick={fit}><Maximize2 size={14} /></button>
       </div>
     </div>
-    <div ref={viewport} className="diagram-viewport" aria-label="Diaqram sahəsi. Sürüşdürərək digər addımlara baxın." style={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto", backgroundColor: "#f9fbfc", backgroundImage: "radial-gradient(#dce5ea 0.8px, transparent 0.8px)", backgroundSize: "18px 18px", cursor: panning ? "grabbing" : "grab", touchAction: "pan-x pan-y" }}
+    <div ref={viewport} className="diagram-viewport" tabIndex={0} role="region" aria-label="Diaqram sahəsi. Sürüşdürün və ya ox düymələri ilə digər addımlara baxın." style={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto", backgroundColor: "#f9fbfc", backgroundImage: "radial-gradient(#dce5ea 0.8px, transparent 0.8px)", backgroundSize: "18px 18px", cursor: panning ? "grabbing" : "grab", touchAction: "pan-x pan-y" }}
       onPointerDown={(event) => {
-        if (event.button !== 0 || (event.target as Element).closest("[data-step-id]")) return;
+        if (!event.isPrimary || event.button !== 0 || (event.target as Element).closest("[data-step-id]")) return;
         const view = viewport.current;
         if (!view) return;
         pan.current = { x: event.clientX, y: event.clientY, left: view.scrollLeft, top: view.scrollTop };
@@ -127,6 +189,7 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
         viewport.current.scrollTop = pan.current.top + pan.current.y - event.clientY;
       }}
       onPointerUp={(event) => { pan.current = null; setPanning(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+      onLostPointerCapture={() => { pan.current = null; setPanning(false); }}
       onPointerCancel={() => { pan.current = null; setPanning(false); }}>
       <div style={{ width: diagramWidth * zoom + 48, minWidth: "100%", height: diagramHeight * zoom + 48, minHeight: "100%", padding: 24, boxSizing: "border-box" }}>
         <svg id="process-diagram" xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${diagramWidth} ${diagramHeight}`} width={diagramWidth * zoom} height={diagramHeight * zoom} role="group" aria-label="İş axınının BPMN diaqramı" style={{ display: "block", fontFamily: "Arial, sans-serif", overflow: "visible" }}>
@@ -138,10 +201,11 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
           {layout.pools.map((pool, index) => <g key={pool.id}>
             <rect x={pool.x} y={pool.y} width={pool.width} height={pool.height} rx="8" fill={index % 2 ? "#fffdfb" : "#ffffff"} stroke="#dbe4e9" strokeWidth="1.3" />
             <path d={`M ${pool.x + 8} ${pool.y} H ${pool.x + pool.width - 8} Q ${pool.x + pool.width} ${pool.y} ${pool.x + pool.width} ${pool.y + 8} V ${pool.y + 36} H ${pool.x} V ${pool.y + 8} Q ${pool.x} ${pool.y} ${pool.x + 8} ${pool.y} Z`} fill="#f0f3fa" />
-            <text x={pool.x + 16} y={pool.y + 23} fill="#586178" fontSize="12" fontWeight="600">{pool.name || "Adsız pool"}</text>
+            <text x={pool.x + 16} y={pool.y + 23} fill="#586178" fontSize="12" fontWeight="600"><title>{pool.name || "Adsız pool"}</title>{wrapText(pool.name || "Adsız pool", Math.max(8, Math.floor((pool.width - 124) / 6.5)), 1)[0]}</text>
             <text x={pool.x + pool.width - 16} y={pool.y + 23} textAnchor="end" fill="#929aac" fontSize="10">POOL {index + 1}</text>
           </g>)}
           {layout.lanes.map((lane, index) => <g key={lane.id}>
+            <title>{lane.name || "Adsız iştirakçı"}</title>
             <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} fill={index % 2 ? "#fcfdfe" : "#ffffff"} stroke="#e3e9ed" strokeWidth="1" />
             <rect x={lane.x} y={lane.y} width={136} height={lane.height} fill={index % 2 ? "#f5f8fa" : "#f8fafb"} />
             <line x1={lane.x + 136} y1={lane.y} x2={lane.x + 136} y2={lane.y + lane.height} stroke="#e3e9ed" />
@@ -157,6 +221,7 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
             const labelLines = edge.label ? wrapText(edge.label, Math.max(5, Math.floor((maxLabelWidth - 14) / 5.6)), 2) : [];
             const labelWidth = Math.min(maxLabelWidth, Math.max(36, ...labelLines.map((line) => line.length * 5.6 + 14)));
             return <g key={`${edge.sourceId}-${edge.targetId}-${index}`}>
+              <title>{edge.label || "Keçid"}</title>
               <path d={path} fill="none" stroke={edge.message && !association ? "#9a87bf" : "#81939d"} strokeWidth="1.65" strokeDasharray={association ? "2 4" : edge.message ? "6 5" : undefined} strokeLinejoin="round" strokeLinecap="round" markerEnd={association ? undefined : `url(#${markerPrefix}-${edge.message ? "message" : "arrow"})`} />
               {edge.message && !association && <circle cx={edge.points[0].x} cy={edge.points[0].y} r="3" fill="white" stroke="#9a87bf" strokeWidth="1.3" />}
               {edge.label && <g>
@@ -174,17 +239,17 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
             const gateway = ["xor", "or", "and"].includes(step.type);
             const event = ["start", "end", "intermediate", "message", "timer"].includes(step.type);
             const r = Math.min(width, height) / 2;
-            const stroke = selected ? "#159c88" : gateway ? "#c0a45f" : event ? step.type === "start" ? "#42ae95" : step.type === "end" ? "#d88781" : "#8c9ac0" : "#99b9c5";
+            const stroke = gateway ? "#c0a45f" : event ? step.type === "start" ? "#42ae95" : step.type === "end" ? "#d88781" : "#8c9ac0" : "#99b9c5";
             const fill = gateway ? "#fffaf0" : step.type === "start" ? "#eaf8f2" : step.type === "end" ? "#fff0ec" : event ? "#f1f2fc" : step.type === "annotation" ? "#faf8ff" : "#f3fafb";
             return <g key={node.id} data-step-id={node.id} role="button" tabIndex={0} aria-label={`${typeLabels[step.type]}: ${step.title || "Adsız addım"}`} aria-pressed={selected} onClick={() => onSelect(node.id)} onKeyDown={(key) => { if (key.key === "Enter" || key.key === " ") { key.preventDefault(); onSelect(node.id); } }} style={{ cursor: "pointer", outlineOffset: 4 }}>
               <title>{`${typeLabels[step.type]}: ${step.title || "Adsız addım"}`}</title>
-              {selected && <rect x={x - 6} y={y - 6} width={width + 12} height={height + 12} rx={event ? r + 6 : 12} fill="none" stroke="#1aad96" strokeOpacity="0.3" strokeWidth="3" />}
+              {selected && <rect data-editor-only="selection" x={x - 6} y={y - 6} width={width + 12} height={height + 12} rx={event ? r + 6 : 12} fill="none" stroke="#1aad96" strokeOpacity="0.8" strokeWidth="2.5" />}
               {gateway ? <>
-                <path d={`M ${cx} ${y} L ${x + width} ${cy} L ${cx} ${y + height} L ${x} ${cy} Z`} fill={fill} stroke={stroke} strokeWidth={selected ? 2.5 : 1.8} />
+                <path d={`M ${cx} ${y} L ${x + width} ${cy} L ${cx} ${y + height} L ${x} ${cy} Z`} fill={fill} stroke={stroke} strokeWidth="1.8" />
                 {step.type === "or" ? <circle cx={cx} cy={cy} r="11" fill="none" stroke="#ae934e" strokeWidth="2.2" /> : <text x={cx} y={cy + 7} textAnchor="middle" fill="#ae934e" fontSize={step.type === "and" ? 29 : 24} fontWeight="500">{step.type === "and" ? "+" : "×"}</text>}
                 <TextLines text={step.title} x={cx} y={y + height + 23} width={130} maxLines={2} size={11} />
               </> : event ? <>
-                <circle cx={cx} cy={cy} r={r - 1} fill={fill} stroke={stroke} strokeWidth={step.type === "end" ? 3 : selected ? 2.5 : 1.8} />
+                <circle cx={cx} cy={cy} r={r - 1} fill={fill} stroke={stroke} strokeWidth={step.type === "end" ? 3 : 1.8} />
                 {["end", "intermediate", "message", "timer"].includes(step.type) && <circle cx={cx} cy={cy} r={r - 6} fill="none" stroke={stroke} strokeWidth="1" />}
                 {step.type === "message" && <g stroke="#8491b5" strokeWidth="1.4" fill="none"><rect x={cx - 11} y={cy - 7} width="22" height="14" rx="1" /><path d={`M ${cx - 11} ${cy - 7} L ${cx} ${cy + 1} L ${cx + 11} ${cy - 7}`} /></g>}
                 {step.type === "timer" && <g stroke="#8491b5" strokeWidth="1.4" fill="none"><circle cx={cx} cy={cy} r="12" /><path d={`M ${cx} ${cy - 8} V ${cy} L ${cx + 6} ${cy + 4}`} />{[0, 1, 2, 3].map((tick) => <line key={tick} x1={cx} y1={cy - 12} x2={cx} y2={cy - 9} transform={`rotate(${tick * 90} ${cx} ${cy})`} />)}</g>}
@@ -192,14 +257,14 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
                 {step.type === "end" && <rect x={cx - 4} y={cy - 4} width="8" height="8" rx="1" fill="#d88781" />}
                 <TextLines text={step.title} x={cx} y={y + height + 22} width={120} maxLines={2} size={11} />
               </> : step.type === "data" ? <>
-                <path d={`M ${x} ${y} H ${x + width - 17} L ${x + width} ${y + 17} V ${y + height} H ${x} Z M ${x + width - 17} ${y} V ${y + 17} H ${x + width}`} fill="#f4f3fd" stroke={selected ? "#159c88" : "#a9a1c8"} strokeWidth="1.7" />
+                <path d={`M ${x} ${y} H ${x + width - 17} L ${x + width} ${y + 17} V ${y + height} H ${x} Z M ${x + width - 17} ${y} V ${y + 17} H ${x + width}`} fill="#f4f3fd" stroke="#a9a1c8" strokeWidth="1.7" />
                 <TextLines text={step.title} x={cx} y={cy + 4} width={width - 24} maxLines={4} />
               </> : step.type === "annotation" ? <>
                 <rect x={x} y={y} width={width} height={height} fill={fill} />
-                <path d={`M ${x + 12} ${y} H ${x} V ${y + height} H ${x + 12}`} stroke={selected ? "#159c88" : "#aea4c6"} strokeWidth="2" fill="none" />
+                <path d={`M ${x + 12} ${y} H ${x} V ${y + height} H ${x + 12}`} stroke="#aea4c6" strokeWidth="2" fill="none" />
                 <TextLines text={step.title} x={cx + 3} y={cy + 4} width={width - 24} maxLines={4} size={11} color="#82758f" />
               </> : <>
-                <rect x={x} y={y} width={width} height={height} rx="9" fill={fill} stroke={stroke} strokeWidth={selected ? 2.5 : 1.6} />
+                <rect x={x} y={y} width={width} height={height} rx="9" fill={fill} stroke={stroke} strokeWidth="1.6" />
                 {step.type === "userTask" && <g transform={`translate(${x + 13} ${y + 11})`} stroke="#7d9eaa" strokeWidth="1.4" fill="none"><circle cx="4" cy="3" r="2.5" /><path d="M 0 11 V 9 Q 0 6 4 6 Q 8 6 8 9 V 11" /></g>}
                 {step.type === "serviceTask" && <g transform={`translate(${x + 17} ${y + 16})`} stroke="#7d9eaa" strokeWidth="1.4" fill="none"><circle r="5" /><circle r="1.8" />{[0, 1, 2, 3].map((tick) => <line key={tick} x1="0" y1="-8" x2="0" y2="-5" transform={`rotate(${tick * 90})`} />)}</g>}
                 <TextLines text={step.title} x={cx} y={cy + (step.type === "subprocess" ? -1 : 4)} width={width - 26} maxLines={step.type === "subprocess" ? 3 : 4} />

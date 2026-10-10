@@ -24,7 +24,7 @@ Azərbaycan dilində, cədvəldə yazılan iş axınını canlı diaqrama çevir
 
 Məlumat serverə göndərilmir. Layihə `localStorage`-da `visioflow:v1:<id>` açarı ilə saxlanılır; URL-dəki `#<id>` həmin brauzerdə onu bərpa edir. Hash silindikdə yeni boş layihə yaranır. Eyni link başqa cihazda məlumatı bərpa etmir. Başqa cihazda davam etmək və brauzer yaddaşı təmizlənməsinə qarşı qorumaq üçün JSON yüklə.
 
-“Hər şeyi sil” təsdiqdən sonra yalnız bu alətin yerli layihə açarlarını silir. Yeni diaqram və ya nümunə açmaq əvvəlki layihənin açarını saxlayır. Brauzer yerli yaddaşı bloklayarsa interfeys bunu göstərir; JSON ixracı işləməyə davam edir.
+“Hər şeyi sil” təsdiqdən sonra yalnız bu alətin yerli layihə açarlarını silir. Yeni diaqram və ya nümunə açmaq əvvəlki layihənin açarını saxlayır. Brauzer yerli yaddaşı bloklayarsa və ya yaddaş dolarsa interfeys bunu göstərir; saxlanılmamış dəyişikliklər başqa layihə açmazdan əvvəl xəbərdarlıq və JSON ehtiyat nüsxəsi ilə qorunur. Silmə uğursuz olarsa hazırkı layihə açıq qalır. Fayl oxunarkən edilən dəyişikliklər gecikmiş importla əvəz edilmir.
 
 ## Lokal inkişaf
 
@@ -81,4 +81,4 @@ VSDX native fiqurlar, Unicode mətn və əlaqəli birləşdiricilərdən ibarət
 
 **Sloth AI hazırda qoşulmayıb.** İstifadə yeri və API müqaviləsi dəqiqləşəndən sonra inteqrasiya ayrıca əlavə edilə bilər. Hazırkı izah xarici AI çağırışı etmədən, cədvəlin məlumatlarından qaydalar əsasında hazırlanır.
 
-İdxal olunan layihələr maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element ilə məhdudlaşdırılır. JSON maksimum 2 MB-dır. Faylın strukturunun düzgünlüyü ayrıca yoxlanılır, yarımçıq layihələr import oluna bilər.
+İdxal olunan layihələr maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element ilə məhdudlaşdırılır. JSON maksimum 100 MB-dır; limit UTF-8 baytları ilə hesablanır və geniş təsvirli layihələrin ehtiyat nüsxələrini yenidən açmağa imkan verir. Brauzerin yerli yaddaş limiti ayrıca tətbiq olunur; böyük layihələrdə JSON ehtiyat nüsxəsini yüklə. Faylın strukturunun düzgünlüyü ayrıca yoxlanılır, yarımçıq layihələr import oluna bilər.

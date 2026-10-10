@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, FileJson, FileText, GitBranch, Layers3, LayoutGrid, LoaderCircle, Plus, RotateCcw, Settings2, ShieldCheck, Trash2, Upload, Users, X } from "lucide-react";
 import type { Project, Step, StepType } from "@/lib/types";
 import { createId, createProject, explainProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
-import { download, filename, MAX_FILE_SIZE, MAX_STORED_SIZE, parseProject, STORAGE_PREFIX } from "@/lib/storage";
+import { download, filename, FILE_SIZE_LABEL, MAX_FILE_SIZE, MAX_STORED_SIZE, parseProject, STORAGE_PREFIX } from "@/lib/storage";
 import Diagram from "./diagram";
 
 type Tab = "people" | "steps" | "explanation";
 type SaveState = "saving" | "saved" | "unavailable";
-type Modal = "reset" | "sample" | "help" | null;
+type Modal = "reset" | "sample" | "help" | "unsaved" | null;
 
 export default function Workspace() {
   const [project, setProject] = useState<Project>(() => createProject());
@@ -23,6 +23,10 @@ export default function Workspace() {
   const [exporting, setExporting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const history = useRef<Project[]>([]);
+  const unsavedChanges = useRef(false);
+  const pendingReplacement = useRef<{ project: Project; protectInitialSave: boolean } | null>(null);
+  const revision = useRef(0);
+  const importRequest = useRef(0);
   const [undoCount, setUndoCount] = useState(0);
   const issues = useMemo(() => validateProject(project), [project]);
   const errors = issues.filter(issue => issue.level === "error");
@@ -46,6 +50,10 @@ export default function Workspace() {
         }
       }
       const next = restored ?? createProject();
+      revision.current += 1;
+      unsavedChanges.current = false;
+      pendingReplacement.current = null;
+      setModal(null);
       setProject(next);
       setTab(next.steps.length ? "steps" : "people");
       setSelected(null);
@@ -65,6 +73,7 @@ export default function Workspace() {
     try {
       localStorage.setItem(STORAGE_PREFIX + project.id, JSON.stringify(project));
       window.history.replaceState(null, "", `#${project.id}`);
+      unsavedChanges.current = false;
       setSaveState("saved");
     } catch { setSaveState("unavailable"); }
   }, [project, ready]);
@@ -94,6 +103,8 @@ export default function Workspace() {
   }, [notice]);
 
   function update(change: (current: Project) => Project) {
+    revision.current += 1;
+    unsavedChanges.current = true;
     history.current = [...history.current.slice(-29), project];
     setUndoCount(history.current.length);
     setProject(change(project));
@@ -105,29 +116,62 @@ export default function Workspace() {
 
   function undo() {
     const previous = history.current.pop();
-    if (previous) { setProject(previous); setUndoCount(history.current.length); }
+    if (previous) {
+      revision.current += 1;
+      unsavedChanges.current = true;
+      setProject(previous);
+      setUndoCount(history.current.length);
+    }
   }
 
-  function replace(next: Project) {
+  function replace(next: Project, discardUnsaved = false, protectInitialSave = true): boolean {
+    // Opening a project is a newer intent even when a save warning pauses it.
+    revision.current += 1;
+    if (unsavedChanges.current && !discardUnsaved) {
+      // A failed autosave must not turn opening another project into data loss.
+      try {
+        localStorage.setItem(STORAGE_PREFIX + project.id, JSON.stringify(project));
+        unsavedChanges.current = false;
+        setSaveState("saved");
+      } catch {
+        pendingReplacement.current = { project: next, protectInitialSave };
+        setModal("unsaved");
+        return false;
+      }
+    }
+    pendingReplacement.current = null;
+    // Imported and sample projects need protection too if their first save fails.
+    unsavedChanges.current = protectInitialSave;
     setProject(next);
     setSelected(null);
     history.current = [];
     setUndoCount(0);
     window.history.replaceState(null, "", `#${next.id}`);
     setTab(next.steps.length ? "steps" : "people");
+    return true;
   }
 
   function sample() {
-    replace({ ...structuredClone(SAMPLE_PROJECT), id: createId() });
+    if (!replace({ ...structuredClone(SAMPLE_PROJECT), id: createId() })) return;
     setModal(null);
     setNotice("Nümunə açıldı. İstənilən xananı dəyişərək öz prosesini qur.");
+  }
+
+  function discardAndReplace() {
+    const next = pendingReplacement.current;
+    if (next) replace(next.project, true, next.protectInitialSave);
+    setModal(null);
   }
 
   function reset() {
     try {
       Object.keys(localStorage).filter(key => key.startsWith(STORAGE_PREFIX)).forEach(key => localStorage.removeItem(key));
-    } catch { setNotice("Brauzer yerli yaddaşın silinməsinə icazə vermədi."); }
-    replace(createProject());
+    } catch {
+      setNotice("Brauzer yerli yaddaşın silinməsinə icazə vermədi. Hazırkı layihə açıq saxlanıldı.");
+      setModal(null);
+      return;
+    }
+    replace(createProject(), true, false);
     setModal(null);
   }
 
@@ -172,6 +216,13 @@ export default function Workspace() {
         const svg = document.getElementById("process-diagram")?.cloneNode(true) as SVGSVGElement | undefined;
         if (!svg) throw new Error("Diaqram tapılmadı.");
         svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        const [, , width, height] = svg.getAttribute("viewBox")!.split(/\s+/).map(Number);
+        svg.setAttribute("width", String(width));
+        svg.setAttribute("height", String(height));
+        svg.querySelectorAll("[data-editor-only]").forEach(element => element.remove());
+        svg.querySelectorAll("[data-step-id]").forEach(element => {
+          for (const attribute of ["role", "tabindex", "aria-pressed"]) element.removeAttribute(attribute);
+        });
         download(new XMLSerializer().serializeToString(svg), `${name}.svg`, "image/svg+xml;charset=utf-8");
       }
       setNotice("Fayl hazırdır. Yükləmə başladıldı.");
@@ -181,20 +232,31 @@ export default function Workspace() {
 
   async function importFile(file?: File) {
     if (!file) return;
+    const request = ++importRequest.current;
+    const startingRevision = revision.current;
     try {
-      if (file.size > MAX_FILE_SIZE) throw new Error("Fayl maksimum 2 MB ola bilər.");
-      const next = parseProject(await file.text());
-      replace({ ...next, id: createId() });
+      if (file.size > MAX_FILE_SIZE) throw new Error(`Fayl maksimum ${FILE_SIZE_LABEL} ola bilər.`);
+      const text = await file.text();
+      if (request !== importRequest.current) return;
+      if (startingRevision !== revision.current) {
+        setNotice("Fayl oxunarkən layihə dəyişdi. Dəyişikliklər qorundu; faylı yenidən aç.");
+        return;
+      }
+      const next = parseProject(text);
+      if (!replace({ ...next, id: createId() })) return;
       setNotice("Layihə açıldı. Əvvəlki layihə öz ünvanında saxlanılıb.");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Fayl oxunmadı."); }
-    if (fileInput.current) fileInput.current.value = "";
+    } catch (error) {
+      if (request === importRequest.current) setNotice(error instanceof Error ? error.message : "Fayl oxunmadı.");
+    } finally {
+      if (request === importRequest.current && fileInput.current) fileInput.current.value = "";
+    }
   }
 
   const stepsComplete = project.steps.length > 0 && errors.length === 0;
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="#" onClick={event => event.preventDefault()} aria-label="VisioFlow ana səhifə"><span className="brand-icon"><GitBranch size={23} /></span><span>visio<span className="brand-light">flow</span><small>İŞ AXINI STUDİYASI</small></span></a>
-      <button className="new-project" onClick={() => replace(createProject())}><Plus size={17} /> Yeni diaqram</button>
+      <button className="new-project" onClick={() => replace(createProject(), false, false)}><Plus size={17} /> Yeni diaqram</button>
       <div className="nav-caption">İŞ MƏKANI</div>
       <nav className="main-nav" aria-label="Layihə bölmələri">
         <button className={tab === "people" ? "nav-item active" : "nav-item"} onClick={() => setTab("people")}><Users size={19} /><span>İştirakçılar</span><span className="nav-number">01</span></button>
@@ -226,7 +288,7 @@ export default function Workspace() {
           {tab === "steps" && <div className="steps-editor"><div className="table-scroll"><table className="steps-table"><thead><tr><th>№</th><th>ADDIMIN ADI</th><th>NÖV</th><th>İCRAÇI</th><th/></tr></thead><tbody>{project.steps.map((step,index)=><tr key={step.id} className={selected===step.id?"selected-row":""}><td><button className="row-number" aria-label={`${index+1}-ci addımın keçidləri`} onClick={()=>setSelected(step.id)}>{String(index+1).padStart(2,"0")}</button></td><td><input aria-label={`${index+1}-ci addımın adı`} value={step.title} maxLength={240} onFocus={()=>setSelected(step.id)} onChange={event=>updateStep(step.id,{title:event.target.value})}/><button className="row-details" onClick={()=>setSelected(selected===step.id?null:step.id)}>Təsvir və keçidlər <ChevronRight size={11}/></button></td><td><select aria-label={`${index+1}-ci addımın növü`} value={step.type} onFocus={()=>setSelected(step.id)} onChange={event=>updateStep(step.id,{type:event.target.value as StepType,routes:event.target.value==="end"?[]:step.routes})}>{STEP_TYPES.map(type=><option key={type.value} value={type.value}>{type.label}</option>)}</select></td><td><select aria-label={`${index+1}-ci addımın icraçısı`} value={step.laneId} onFocus={()=>setSelected(step.id)} onChange={event=>updateStep(step.id,{laneId:event.target.value})}>{lanes.map(lane=><option key={lane.id} value={lane.id}>{project.pools.length>1?`${lane.poolName} / `:""}{lane.name}</option>)}</select></td><td><button className="small-icon" aria-label={`${index+1}-ci addımı sil`} onClick={()=>deleteStep(step.id)}><Trash2 size={14}/></button></td></tr>)}</tbody></table></div>
             {project.steps.length===0 && <div className="empty-steps"><span><GitBranch size={29}/></span><h3>Hər proses bir addımla başlayır</h3><p>Başlanğıc hadisəsi əlavə et, sonra tapşırıqları və qərarları cədvəldə ardıcıl qur.</p><button className="primary-button" onClick={()=>addStep("start")}><Plus size={16}/> Başlanğıc əlavə et</button><button className="text-button" onClick={sample}>Nümunə ilə tanış ol <ArrowRight size={14}/></button></div>}
             {project.steps.length>0 && <div className="add-step-bar"><button className="text-button" onClick={()=>addStep()}><Plus size={16}/> Addım əlavə et</button><button className="text-button muted" onClick={()=>addStep("end")}>Son hadisəsi <Plus size={14}/></button></div>}
-            {activeStep && <div className="step-detail"><div className="detail-heading"><span><Settings2 size={16}/> Addım {project.steps.findIndex(step=>step.id===activeStep.id)+1}</span><button className="small-icon" aria-label="Addım detallarını bağla" onClick={()=>setSelected(null)}><X size={16}/></button></div><label className="field-label">Addımın təsviri<textarea value={activeStep.description} maxLength={10000} rows={3} placeholder="İcraçı nə edir? Hansı qaydalar və nəticələr var?" onChange={event=>updateStep(activeStep.id,{description:event.target.value})}/></label><div className="route-heading"><strong>Növbəti keçidlər</strong><span>{["xor","or","and"].includes(activeStep.type)?activeStep.type.toUpperCase()+" keçidi":"Axının davamı"}</span></div>{activeStep.type==="end"?<p className="muted-text">Son hadisəsindən çıxış keçidi yoxdur.</p>:<>{activeStep.routes.map((route,index)=><div className="route-row" key={index}><ArrowRight size={15}/><select aria-label={`Keçid ${index+1} hədəfi`} value={route.targetId} onChange={event=>updateStep(activeStep.id,{routes:activeStep.routes.map((item,i)=>i===index?{...item,targetId:event.target.value}:item)})}><option value="">Növbəti addımı seç</option>{project.steps.filter(step=>step.id!==activeStep.id).map((step,i)=><option key={step.id} value={step.id}>{project.steps.indexOf(step)+1}. {step.title||`Addım ${i+1}`}</option>)}</select><input aria-label={`Keçid ${index+1} şərti`} placeholder="Şərt / əməliyyat" maxLength={500} value={route.label} onChange={event=>updateStep(activeStep.id,{routes:activeStep.routes.map((item,i)=>i===index?{...item,label:event.target.value}:item)})}/><button className="small-icon" aria-label={`Keçid ${index+1} sil`} onClick={()=>updateStep(activeStep.id,{routes:activeStep.routes.filter((_,i)=>i!==index)})}><X size={14}/></button></div>)}<button className="text-button" onClick={()=>{const target=project.steps.find(step=>step.id!==activeStep.id&&!activeStep.routes.some(route=>route.targetId===step.id));if(!target){setNotice("Keçid üçün əvvəl başqa addım əlavə et.");return;}updateStep(activeStep.id,{routes:[...activeStep.routes,{targetId:target.id,label:""}]});}}><Plus size={14}/> Keçid əlavə et</button></>}{["xor","or","and"].includes(activeStep.type)&&<div className="gateway-tip">{activeStep.type==="xor"?"XOR: şərtə uyğun yalnız bir yol seçilir.":activeStep.type==="or"?"OR: şərtlərə uyğun bir və ya bir neçə yol seçilir.":"AND: bütün çıxış yolları paralel davam edir. Birləşmə bütün girişləri gözləyir."}</div>}</div>}
+            {activeStep && <div className="step-detail"><div className="detail-heading"><span><Settings2 size={16}/> Addım {project.steps.findIndex(step=>step.id===activeStep.id)+1}</span><button className="small-icon" aria-label="Addım detallarını bağla" onClick={()=>setSelected(null)}><X size={16}/></button></div><label className="field-label">Addımın təsviri<textarea value={activeStep.description} maxLength={10000} rows={3} placeholder="İcraçı nə edir? Hansı qaydalar və nəticələr var?" onChange={event=>updateStep(activeStep.id,{description:event.target.value})}/></label><div className="route-heading"><strong>Növbəti keçidlər</strong><span>{["xor","or","and"].includes(activeStep.type)?activeStep.type.toUpperCase()+" keçidi":"Axının davamı"}</span></div>{activeStep.type==="end"?<p className="muted-text">Son hadisəsindən çıxış keçidi yoxdur.</p>:<>{activeStep.routes.map((route,index)=><div className="route-row" key={index}><ArrowRight size={15}/><select aria-label={`Keçid ${index+1} hədəfi`} value={route.targetId} onChange={event=>updateStep(activeStep.id,{routes:activeStep.routes.map((item,i)=>i===index?{...item,targetId:event.target.value}:item)})}><option value="">Növbəti addımı seç</option>{project.steps.filter(step=>step.id!==activeStep.id).map((step,i)=><option key={step.id} value={step.id}>{project.steps.indexOf(step)+1}. {step.title||`Addım ${i+1}`}</option>)}</select><input aria-label={`Keçid ${index+1} şərti`} placeholder="Şərt / əməliyyat" maxLength={500} value={route.label} onChange={event=>updateStep(activeStep.id,{routes:activeStep.routes.map((item,i)=>i===index?{...item,label:event.target.value}:item)})}/><button className="small-icon" aria-label={`Keçid ${index+1} sil`} onClick={()=>updateStep(activeStep.id,{routes:activeStep.routes.filter((_,i)=>i!==index)})}><X size={14}/></button></div>)}<button className="text-button" disabled={activeStep.routes.length>=200} title={activeStep.routes.length>=200?"Bir addımda maksimum 200 keçid ola bilər.":undefined} onClick={()=>{const target=project.steps.find(step=>step.id!==activeStep.id&&!activeStep.routes.some(route=>route.targetId===step.id));if(!target){setNotice("Keçid üçün əvvəl başqa addım əlavə et.");return;}updateStep(activeStep.id,{routes:[...activeStep.routes,{targetId:target.id,label:""}]});}}><Plus size={14}/> Keçid əlavə et</button></>}{["xor","or","and"].includes(activeStep.type)&&<div className="gateway-tip">{activeStep.type==="xor"?"XOR: şərtə uyğun yalnız bir yol seçilir.":activeStep.type==="or"?"OR: şərtlərə uyğun bir və ya bir neçə yol seçilir.":"AND: bütün çıxış yolları paralel davam edir. Birləşmə bütün girişləri gözləyir."}</div>}</div>}
             <div className="editor-footer"><span><span className="status-dot"/>{project.steps.length} element · {project.steps.reduce((total,step)=>total+step.routes.length,0)} keçid</span><button className="text-button" onClick={()=>setTab("explanation")}>Yoxla və davam et <ArrowRight size={14}/></button></div>
           </div>}
 
@@ -239,6 +301,15 @@ export default function Workspace() {
     </main>
 
     {notice&&<div className="toast" role="status"><CheckCircle2 size={19}/><span>{notice}</span><button aria-label="Bildirişi bağla" onClick={()=>setNotice("")}><X size={16}/></button></div>}
-    {modal&&<div className="modal-overlay" onClick={()=>setModal(null)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={event=>event.stopPropagation()}><button className="modal-close small-icon" aria-label="Pəncərəni bağla" onClick={()=>setModal(null)}><X size={19}/></button><span className={`modal-icon ${modal==="reset"?"red":""}`}>{modal==="reset"?<Trash2 size={25}/>:modal==="help"?<CircleHelp size={25}/>:<Layers3 size={25}/>}</span><h2 id="modal-title">{modal==="reset"?"Hər şeyi silmək istəyirsən?":modal==="sample"?"Nümunə prosesi açaq?":"Cədvəldən Visio diaqramına"}</h2>{modal==="help"?<div className="help-content"><p><strong>1. İştirakçıları qur.</strong> Pool-un adını və içindəki rolları (lane-ləri) daxil et.</p><p><strong>2. Addımları yaz.</strong> İcraçını, element növünü və keçidləri seç. XOR bir yolu, OR bir və ya bir neçə yolu, AND bütün yolları işə salır.</p><p><strong>3. Yoxla və yüklə.</strong> Diaqramı .vsdx, layihəni isə JSON kimi yüklə.</p><p>İşin bu brauzerdə URL-dəki hash ilə bağlı saxlanılır. Hash-i silsən yeni layihə başlayır. Link başqa cihazda məlumatı açmır. JSON ehtiyat nüsxəsi cihazlar arasında köçürmək üçündür.</p><p>Sloth AI inteqrasiyası hələ aktiv deyil. İzah hazırda qaydalar əsasında yaranır.</p><button className="primary-button" onClick={()=>setModal(null)}>Aydındır <Check size={16}/></button></div>:<><p>{modal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri silinəcək. Əvvəl JSON ehtiyat nüsxəsi yükləyə bilərsən. Bu əməliyyat geri qaytarılmır.":"Müştəri müraciətləri nümunəsi açılacaq. Hazırkı layihə əvvəlki hash ünvanında saxlanılacaq."}</p><div className="modal-actions"><button className="secondary-button" onClick={()=>setModal(null)}>Ləğv et</button><button className={modal==="reset"?"danger-button":"primary-button"} onClick={modal==="reset"?reset:sample}>{modal==="reset"?"Bəli, hər şeyi sil":"Nümunəni aç"}</button></div></>}</section></div>}
+    {modal&&<div className="modal-overlay" onClick={()=>setModal(null)}>
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={event=>event.stopPropagation()}>
+        <button className="modal-close small-icon" aria-label="Pəncərəni bağla" onClick={()=>setModal(null)}><X size={19}/></button>
+        <span className={`modal-icon ${modal==="reset"||modal==="unsaved"?"red":""}`}>{modal==="reset"?<Trash2 size={25}/>:modal==="help"||modal==="unsaved"?<CircleHelp size={25}/>:<Layers3 size={25}/>}</span>
+        <h2 id="modal-title">{modal==="reset"?"Hər şeyi silmək istəyirsən?":modal==="sample"?"Nümunə prosesi açaq?":modal==="unsaved"?"Dəyişikliklər saxlanılmayıb":"Cədvəldən Visio diaqramına"}</h2>
+        {modal==="help"?<div className="help-content"><p><strong>1. İştirakçıları qur.</strong> Pool-un adını və içindəki rolları (lane-ləri) daxil et.</p><p><strong>2. Addımları yaz.</strong> İcraçını, element növünü və keçidləri seç. XOR bir yolu, OR bir və ya bir neçə yolu, AND bütün yolları işə salır.</p><p><strong>3. Yoxla və yüklə.</strong> Diaqramı .vsdx, layihəni isə JSON kimi yüklə.</p><p>İşin bu brauzerdə URL-dəki hash ilə bağlı saxlanılır. Hash-i silsən yeni layihə başlayır. Link başqa cihazda məlumatı açmır. JSON ehtiyat nüsxəsi cihazlar arasında köçürmək üçündür.</p><p>Sloth AI inteqrasiyası hələ aktiv deyil. İzah hazırda qaydalar əsasında yaranır.</p><button className="primary-button" onClick={()=>setModal(null)}>Aydındır <Check size={16}/></button></div>
+          :modal==="unsaved"?<><p>Brauzer dəyişiklikləri saxlaya bilmədi. Başqa layihə açsan hazırkı dəyişikliklər itəcək. Davam etməzdən əvvəl JSON ehtiyat nüsxəsini yüklə.</p><button className="text-button" onClick={()=>void exportFile("json")}><ArrowDownToLine size={15}/> JSON ehtiyat nüsxəsi</button><div className="modal-actions"><button className="secondary-button" onClick={()=>setModal(null)}>Ləğv et</button><button className="danger-button" onClick={discardAndReplace}>Saxlamadan davam et</button></div></>
+          :<><p>{modal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri silinəcək. Əvvəl JSON ehtiyat nüsxəsi yükləyə bilərsən. Bu əməliyyat geri qaytarılmır.":"Müştəri müraciətləri nümunəsi açılacaq. Hazırkı layihə əvvəlki hash ünvanında saxlanılacaq."}</p><div className="modal-actions"><button className="secondary-button" onClick={()=>setModal(null)}>Ləğv et</button><button className={modal==="reset"?"danger-button":"primary-button"} onClick={modal==="reset"?reset:sample}>{modal==="reset"?"Bəli, hər şeyi sil":"Nümunəni aç"}</button></div></>}
+      </section>
+    </div>}
   </div>;
 }

@@ -38,6 +38,23 @@ test("runtime import validation rejects bad versions, shapes, duplicates and ove
   assert.equal(isProject({ ...simpleProject(), steps: Array.from({ length: 201 }, (_, i) => ({ ...simpleProject().steps[0], id: `step-${i}` })) }), false);
 });
 
+test("prototype-like IDs are normal graph identities and unknown inherited names remain missing", () => {
+  const project = simpleProject();
+  project.steps[1].id = "constructor";
+  project.steps[0].routes[0].targetId = "constructor";
+  project.steps[2].id = "__proto__";
+  project.steps[1].routes[0].targetId = "__proto__";
+  assert.equal(isProject(project), true);
+  assert.deepEqual(validateProject(project), []);
+  const layout = layoutProject(project);
+  assert.equal(layout.nodes.length, 3);
+  assert.equal(layout.edges.length, 2);
+  assert.match(explainProject(project), /Keçid: Bitir/);
+  project.steps[1].routes[0].targetId = "toString";
+  assert.ok(validateProject(project).some((issue) => issue.level === "error" && issue.stepId === "constructor"));
+  assert.equal(layoutProject(project).edges.length, 1);
+});
+
 test("incomplete route destinations survive storage round trips and remain validation errors", () => {
   const project = simpleProject();
   project.steps[1].routes = [{ targetId: "", label: "Qərar hələ verilməyib" }];
@@ -140,6 +157,32 @@ test("parallel nodes in the same lane and layer never overlap", () => {
   const second = layout.nodes.find((node) => node.id === "parallel")!;
   assert.equal(first.x, second.x);
   assert.ok(first.y + first.height < second.y || second.y + second.height < first.y);
+});
+
+test("backward route corridors leave space for separate two-line condition labels", () => {
+  const project = structuredClone(SAMPLE_PROJECT);
+  for (const id of ["executor-note", "related-response"]) {
+    project.steps.find((step) => step.id === id)!.routes[0].label = "İcra prosesi yenidən davam etdirilir";
+  }
+  const layout = layoutProject(project);
+  const first = layout.edges.find((edge) => edge.sourceId === "executor-note")!;
+  const second = layout.edges.find((edge) => edge.sourceId === "related-response")!;
+  assert.equal(first.points.length, 6);
+  assert.equal(second.points.length, 6);
+  assert.ok(Math.abs(first.points[2].y - second.points[2].y) >= 29);
+});
+
+test("self-loop endpoints connect to the same node rather than leaving detached arrows", () => {
+  const project = simpleProject();
+  project.steps[1].routes.push({ targetId: "work", label: "Təkrar yoxla" });
+  const layout = layoutProject(project);
+  const node = layout.nodes.find((node) => node.id === "work")!;
+  const edge = layout.edges.find((edge) => edge.sourceId === "work" && edge.targetId === "work")!;
+  assert.equal(edge.points[0].x, node.x + node.width);
+  assert.equal(edge.points.at(-1)!.x, node.x);
+  assert.ok(edge.points[0].y > node.y && edge.points[0].y < node.y + node.height);
+  assert.ok(edge.points.at(-1)!.y > node.y && edge.points.at(-1)!.y < node.y + node.height);
+  assert.ok(edge.points.some((point) => point.y > node.y + node.height + 30));
 });
 
 test("cross-pool edges are message flows, empty projects and dangling links are safe to lay out", () => {

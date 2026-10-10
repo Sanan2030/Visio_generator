@@ -5,6 +5,8 @@ const CONTENT_X = 184;
 const TASK_WIDTH = 164;
 const ROW_PITCH = 118;
 const POOL_HEADER = 36;
+// The SVG renderer uses a 29px box for two-line route labels.
+const CORRIDOR_PITCH = 36;
 
 function dimensions(type: StepType): { width: number; height: number } {
   if (type === "start" || type === "end" || type === "intermediate" || type === "message" || type === "timer") return { width: 48, height: 48 };
@@ -79,7 +81,7 @@ export function layoutProject(project: Project): ProjectLayout {
         buckets.set(column, [...(buckets.get(column) || []), step]);
       }
       const stackCount = Math.max(1, ...[...buckets.values()].map((bucket) => bucket.length));
-      const laneHeight = Math.max(208, stackCount * ROW_PITCH + 108 + Math.max(0, (corridorCounts.get(lane.id) ?? 0) - 1) * 24);
+      const laneHeight = Math.max(208, stackCount * ROW_PITCH + 108 + Math.max(0, (corridorCounts.get(lane.id) ?? 0) - 1) * CORRIDOR_PITCH);
       lanes.push({ id: lane.id, name: lane.name, poolId: pool.id, x: 16, y: laneY, width: width - 32, height: laneHeight });
       for (const [column, bucket] of buckets) {
         bucket.forEach((step, index) => {
@@ -137,7 +139,7 @@ export function layoutProject(project: Project): ProjectLayout {
         const corridorLane = sourceLane.y >= targetLane.y ? sourceLane : targetLane;
         const useCount = corridorUsage.get(corridorLane.id) || 0;
         corridorUsage.set(corridorLane.id, useCount + 1);
-        const corridorY = corridorLane.y + corridorLane.height - 16 - useCount * 24;
+        const corridorY = corridorLane.y + corridorLane.height - 16 - useCount * CORRIDOR_PITCH;
         const exitX = CONTENT_X + sourceColumn * COLUMN_PITCH + TASK_WIDTH + 28 + (routeIndex % 4) * 4;
         const entryX = CONTENT_X + targetColumn * COLUMN_PITCH - 18 - (targetIndex % 4) * 4;
         points = [

@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { layoutProject } from "./layout";
+import { isProject } from "./process";
 import type { LayoutEdge, LayoutNode, LayoutPoint, Project, Step } from "./types";
 
 const VISIO_NS = "http://schemas.microsoft.com/office/visio/2012/main";
@@ -27,13 +28,18 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
+/** Character references prevent XML attribute whitespace normalization. */
+function escapeAttribute(value: string): string {
+  return escapeXml(value).replace(/\t/g, "&#x9;").replace(/\n/g, "&#xA;").replace(/\r/g, "&#xD;");
+}
+
 function number(value: number): string {
   if (!Number.isFinite(value)) throw new Error("Diaqram koordinatı düzgün deyil.");
   return String(Math.round(value * 1_000_000) / 1_000_000);
 }
 
 function cell(name: string, value: number | string, formula?: string, unit?: string): string {
-  return `<Cell N="${escapeXml(name)}" V="${escapeXml(typeof value === "number" ? number(value) : value)}"${unit ? ` U="${unit}"` : ""}${formula ? ` F="${escapeXml(formula)}"` : ""}/>`;
+  return `<Cell N="${escapeAttribute(name)}" V="${escapeAttribute(typeof value === "number" ? number(value) : value)}"${unit ? ` U="${unit}"` : ""}${formula ? ` F="${escapeAttribute(formula)}"` : ""}/>`;
 }
 
 function characterSection(size = 10, color = "#24344B", bold = false): string {
@@ -82,7 +88,7 @@ function nativeShape(options: NativeShapeOptions): string {
   const { id, name, rect, pageHeight, geometry, text } = options;
   const width = rect.width / PIXELS_PER_INCH;
   const height = rect.height / PIXELS_PER_INCH;
-  return `<Shape ID="${id}" Name="${escapeXml(name)}" NameU="Shape.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("PinX", (rect.x + rect.width / 2) / PIXELS_PER_INCH)}${cell("PinY", (pageHeight - rect.y - rect.height / 2) / PIXELS_PER_INCH)}${cell("Width", width)}${cell("Height", height)}${cell("LocPinX", width / 2, "Width*0.5")}${cell("LocPinY", height / 2, "Height*0.5")}${cell("Angle", 0)}${cell("LineColor", options.line ?? "#8795AD")}${cell("LineWeight", options.lineWidth ?? 0.013889)}${cell("LinePattern", 1)}${cell("FillForegnd", options.fill ?? "#FFFFFF")}${cell("FillPattern", options.fillPattern ?? 1)}${cell("VerticalAlign", 1)}${cell("LeftMargin", 0.07)}${cell("RightMargin", 0.07)}${cell("TopMargin", 0.04)}${cell("BottomMargin", 0.04)}${options.cells ?? ""}${characterSection(options.fontSize, "#24344B", options.bold)}${geometry}${options.sections ?? ""}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(text)}</Text></Shape>`;
+  return `<Shape ID="${id}" Name="${escapeAttribute(name)}" NameU="Shape.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("PinX", (rect.x + rect.width / 2) / PIXELS_PER_INCH)}${cell("PinY", (pageHeight - rect.y - rect.height / 2) / PIXELS_PER_INCH)}${cell("Width", width)}${cell("Height", height)}${cell("LocPinX", width / 2, "Width*0.5")}${cell("LocPinY", height / 2, "Height*0.5")}${cell("Angle", 0)}${cell("FlipX", 0)}${cell("FlipY", 0)}${cell("LineColor", options.line ?? "#8795AD")}${cell("LineWeight", options.lineWidth ?? 0.013889)}${cell("LinePattern", 1)}${cell("FillForegnd", options.fill ?? "#FFFFFF")}${cell("FillPattern", options.fillPattern ?? 1)}${cell("VerticalAlign", 1)}${cell("LeftMargin", 0.07)}${cell("RightMargin", 0.07)}${cell("TopMargin", 0.04)}${cell("BottomMargin", 0.04)}${options.cells ?? ""}${characterSection(options.fontSize, "#24344B", options.bold)}${geometry}${options.sections ?? ""}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(text)}</Text></Shape>`;
 }
 
 function properties(step: Step): string {
@@ -104,7 +110,7 @@ function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number,
 
   if (event || gateway) {
     // The label is outside the symbol; all label text stays editable on the same shape.
-    cells = cell("TxtWidth", Math.max(width, 1.5)) + cell("TxtHeight", 0.5) +
+    cells = cell("TxtWidth", Math.max(width, 1.5), "MAX(Width,1.5)") + cell("TxtHeight", 0.5) +
       cell("TxtPinX", width / 2, "Width*0.5") + cell("TxtPinY", -0.28) +
       cell("TxtLocPinX", Math.max(width, 1.5) / 2, "TxtWidth*0.5") + cell("TxtLocPinY", 0.25, "TxtHeight*0.5");
     fontSize = 9;
@@ -138,10 +144,12 @@ function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number,
     }
   } else if (step.type === "data") {
     fill = "#F0F3FA";
+    cells = cell("Rounding", 0);
     geometry = polyline(0, [[0, 0], [1, 0], [1, 0.76], [0.8, 1], [0, 1], [0, 0]], width, height, true);
     geometry += polyline(1, [[0.8, 1], [0.8, 0.76], [1, 0.76]], width, height);
   } else if (step.type === "annotation") {
     line = "#A0A8B8";
+    cells = cell("Rounding", 0);
     geometry = polyline(0, [[0.12, 1], [0, 1], [0, 0], [0.12, 0]], width, height);
   } else if (step.type === "subprocess") {
     geometry += polyline(1, [[0.46, 0.08], [0.54, 0.08], [0.54, 0.23], [0.46, 0.23], [0.46, 0.08]], width, height);
@@ -187,13 +195,15 @@ function connectorShape(edge: LayoutEdge, id: number, sourceId: number, targetId
   const local = points.map((point) => ({ x: (point.x - begin.x) * cosine + (point.y - begin.y) * sine, y: -(point.x - begin.x) * sine + (point.y - begin.y) * cosine }));
   const endpoint = (sheet: number, anchor: number, axis: "X" | "Y") => {
     const ref = `Sheet.${sheet}!`;
-    const offsetX = `(${ref}Connections.X${anchor + 1}-${ref}LocPinX)`;
-    const offsetY = `(${ref}Connections.Y${anchor + 1}-${ref}LocPinY)`;
+    const offsetX = `((${ref}Connections.X${anchor + 1}-${ref}LocPinX)*IF(${ref}FlipX,-1,1))`;
+    const offsetY = `((${ref}Connections.Y${anchor + 1}-${ref}LocPinY)*IF(${ref}FlipY,-1,1))`;
     return axis === "X"
       ? `GUARD(${ref}PinX+${offsetX}*COS(${ref}Angle)-${offsetY}*SIN(${ref}Angle))`
       : `GUARD(${ref}PinY+${offsetX}*SIN(${ref}Angle)+${offsetY}*COS(${ref}Angle))`;
   };
   const geometry = `<Section N="Geometry" IX="0">${cell("NoFill", 1)}${local.map((point, index) => `<Row IX="${index + 1}" T="${index === 0 ? "MoveTo" : "LineTo"}">${cell("X", point.x, `Width*${number(point.x / length)}`)}${cell("Y", point.y)}</Row>`).join("")}</Section>`;
+  const message = edge.message && !association;
+  // Visio arrow style 20 is the centered unfilled circle used by BPMN messages.
   // Short branch routes place labels near their distinct targets. Feedback routes
   // use their long corridor so a tiny final segment does not crowd a task label.
   const segments: { begin: LayoutPoint; end: LayoutPoint; length: number; horizontal: boolean }[] = [];
@@ -221,7 +231,7 @@ function connectorShape(edge: LayoutEdge, id: number, sourceId: number, targetId
   // Text is upright, and this position is expressed in the rotated 1-D shape's
   // local coordinates. A local Y offset alone would not mean "above" on the page.
   const labelPoint = { x: (pageLabel.x - begin.x) * cosine + (pageLabel.y - begin.y) * sine, y: -(pageLabel.x - begin.x) * sine + (pageLabel.y - begin.y) * cosine };
-  const shape = `<Shape ID="${id}" Name="${escapeXml(edge.label || "Keçid")}" NameU="Connector.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("BeginX", begin.x, endpoint(sourceId, sourceAnchor, "X"))}${cell("BeginY", begin.y, endpoint(sourceId, sourceAnchor, "Y"))}${cell("EndX", end.x, endpoint(targetId, targetAnchor, "X"))}${cell("EndY", end.y, endpoint(targetId, targetAnchor, "Y"))}${cell("PinX", (begin.x + end.x) / 2, "(BeginX+EndX)*0.5")}${cell("PinY", (begin.y + end.y) / 2, "(BeginY+EndY)*0.5")}${cell("Width", length, "SQRT((EndX-BeginX)^2+(EndY-BeginY)^2)")}${cell("Height", 0)}${cell("LocPinX", length / 2, "Width*0.5")}${cell("LocPinY", 0)}${cell("Angle", angle, "ATAN2(EndY-BeginY,EndX-BeginX)")}${cell("ObjType", 2)}${cell("GlueType", 4)}${cell("LineColor", edge.message ? "#8E70BB" : "#617898")}${cell("LineWeight", 0.013889)}${cell("LinePattern", association ? 3 : edge.message ? 2 : 1)}${cell("FillPattern", 0)}${cell("BeginArrow", !association && edge.message ? 10 : 0)}${cell("EndArrow", association ? 0 : edge.message ? 1 : 13)}${cell("EndArrowSize", 2)}${cell("BegTrigger", 0, `Sheet.${sourceId}!EventXFMod`)}${cell("EndTrigger", 0, `Sheet.${targetId}!EventXFMod`)}${cell("TxtPinX", labelPoint.x, `Width*${number(labelPoint.x / length)}`)}${cell("TxtPinY", labelPoint.y)}${cell("TxtWidth", labelWidth)}${cell("TxtHeight", 0.5)}${cell("TxtLocPinX", labelWidth / 2, "TxtWidth*0.5")}${cell("TxtLocPinY", 0.25, "TxtHeight*0.5")}${cell("TxtAngle", -angle, "-Angle")}${characterSection(8)}${geometry}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(edge.label)}</Text></Shape>`;
+  const shape = `<Shape ID="${id}" Name="${escapeAttribute(edge.label || "Keçid")}" NameU="Connector.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("BeginX", begin.x, endpoint(sourceId, sourceAnchor, "X"))}${cell("BeginY", begin.y, endpoint(sourceId, sourceAnchor, "Y"))}${cell("EndX", end.x, endpoint(targetId, targetAnchor, "X"))}${cell("EndY", end.y, endpoint(targetId, targetAnchor, "Y"))}${cell("PinX", (begin.x + end.x) / 2, "(BeginX+EndX)*0.5")}${cell("PinY", (begin.y + end.y) / 2, "(BeginY+EndY)*0.5")}${cell("Width", length, "SQRT((EndX-BeginX)^2+(EndY-BeginY)^2)")}${cell("Height", 0)}${cell("LocPinX", length / 2, "Width*0.5")}${cell("LocPinY", 0)}${cell("Angle", angle, "ATAN2(EndY-BeginY,EndX-BeginX)")}${cell("ObjType", 2)}${cell("GlueType", 4)}${cell("LineColor", edge.message ? "#8E70BB" : "#617898")}${cell("LineWeight", 0.013889)}${cell("LinePattern", association ? 3 : edge.message ? 2 : 1)}${cell("FillPattern", 0)}${cell("BeginArrow", message ? 20 : 0)}${cell("EndArrow", association ? 0 : edge.message ? 1 : 13)}${cell("EndArrowSize", 2)}${cell("BegTrigger", 0, `Sheet.${sourceId}!EventXFMod`)}${cell("EndTrigger", 0, `Sheet.${targetId}!EventXFMod`)}${cell("TxtPinX", labelPoint.x, `Width*${number(labelPoint.x / length)}`)}${cell("TxtPinY", labelPoint.y)}${cell("TxtWidth", labelWidth)}${cell("TxtHeight", 0.5)}${cell("TxtLocPinX", labelWidth / 2, "TxtWidth*0.5")}${cell("TxtLocPinY", 0.25, "TxtHeight*0.5")}${cell("TxtAngle", -angle, "-Angle")}${characterSection(8)}${geometry}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(edge.label)}</Text></Shape>`;
   const connects = `<Connect FromSheet="${id}" FromCell="BeginX" FromPart="9" ToSheet="${sourceId}" ToCell="Connections.X${sourceAnchor + 1}" ToPart="${100 + sourceAnchor}"/><Connect FromSheet="${id}" FromCell="EndX" FromPart="12" ToSheet="${targetId}" ToCell="Connections.X${targetAnchor + 1}" ToPart="${100 + targetAnchor}"/>`;
   return { shape, connects };
 }
@@ -236,6 +246,17 @@ function relationships(entries: { id: string; type: string; target: string }[]):
  * be checked in Visio; package/graph validation alone is not a desktop smoke test.
  */
 export async function generateVsdx(project: Project): Promise<Uint8Array> {
+  // Reject broken references before layout can silently omit their shapes/edges.
+  // This permits drafts without start/end events; semantic checks belong to the editor.
+  if (!isProject(project)) throw new Error("Layihənin strukturu düzgün deyil; Visio faylı yaradılmadı.");
+  const laneIds = new Set(project.pools.flatMap((pool) => pool.lanes.map((lane) => lane.id)));
+  const stepIds = new Set(project.steps.map((step) => step.id));
+  for (const step of project.steps) {
+    if (!laneIds.has(step.laneId)) throw new Error(`“${step.title || "Adsız addım"}” üçün mövcud icraçı zolağı seçin.`);
+    if (step.routes.some((route) => !stepIds.has(route.targetId))) {
+      throw new Error(`“${step.title || "Adsız addım"}” addımındakı keçidin hədəfi mövcud deyil.`);
+    }
+  }
   const layout = layoutProject(project);
   const zip = new JSZip();
   let nextId = 1;
@@ -263,13 +284,14 @@ export async function generateVsdx(project: Project): Promise<Uint8Array> {
   for (const pool of layout.pools) {
     const width = pool.width / PIXELS_PER_INCH;
     const height = pool.height / PIXELS_PER_INCH;
-    shapes.push(nativeShape({ id: nextId++, name: pool.name, rect: pool, pageHeight: layout.height, geometry: rectangle(width, height), text: pool.name, fill: "#EDF2FC", line: "#9EB0CD", bold: true, cells: cell("TxtWidth", Math.max(width - 0.3, 0.1)) + cell("TxtHeight", 0.3) + cell("TxtPinX", width / 2, "Width*0.5") + cell("TxtPinY", height - 0.1875, "Height-0.1875") + cell("TxtLocPinX", (width - 0.3) / 2, "TxtWidth*0.5") + cell("TxtLocPinY", 0.15) }));
+    shapes.push(nativeShape({ id: nextId++, name: pool.name, rect: pool, pageHeight: layout.height, geometry: rectangle(width, height), text: pool.name, fill: "#EDF2FC", line: "#9EB0CD", bold: true, cells: cell("TxtWidth", Math.max(width - 0.3, 0.1), "MAX(Width-0.3,0.1)") + cell("TxtHeight", 0.3) + cell("TxtPinX", width / 2, "Width*0.5") + cell("TxtPinY", height - 0.1875, "Height-0.1875") + cell("TxtLocPinX", (width - 0.3) / 2, "TxtWidth*0.5") + cell("TxtLocPinY", 0.15) }));
   }
   for (const lane of layout.lanes) {
     const width = lane.width / PIXELS_PER_INCH;
     const height = lane.height / PIXELS_PER_INCH;
-    const divider = Math.min(136 / lane.width, 1);
-    shapes.push(nativeShape({ id: nextId++, name: lane.name, rect: lane, pageHeight: layout.height, geometry: rectangle(width, height) + polyline(1, [[divider, 0], [divider, 1]], width, height), text: lane.name, fill: "#FBFCFE", line: "#CAD4E4", fontSize: 10, bold: true, cells: cell("TxtWidth", Math.min(1.25, width)) + cell("TxtHeight", Math.max(height - 0.15, 0.1)) + cell("TxtPinX", Math.min(68 / PIXELS_PER_INCH, width / 2)) + cell("TxtPinY", height / 2, "Height*0.5") + cell("TxtLocPinX", Math.min(1.25, width) / 2, "TxtWidth*0.5") + cell("TxtLocPinY", (height - 0.15) / 2, "TxtHeight*0.5") }));
+    const divider = Math.min(136 / PIXELS_PER_INCH, width);
+    const dividerGeometry = `<Section N="Geometry" IX="1">${cell("NoFill", 1)}<Row IX="1" T="MoveTo">${cell("X", divider, `MIN(Width,${number(136 / PIXELS_PER_INCH)})`)}${cell("Y", 0)}</Row><Row IX="2" T="LineTo">${cell("X", divider, `MIN(Width,${number(136 / PIXELS_PER_INCH)})`)}${cell("Y", height, "Height")}</Row></Section>`;
+    shapes.push(nativeShape({ id: nextId++, name: lane.name, rect: lane, pageHeight: layout.height, geometry: rectangle(width, height) + dividerGeometry, text: lane.name, fill: "#FBFCFE", line: "#CAD4E4", fontSize: 10, bold: true, cells: cell("TxtWidth", Math.min(1.25, width), "MIN(1.25,Width)") + cell("TxtHeight", Math.max(height - 0.15, 0.1), "MAX(Height-0.15,0.1)") + cell("TxtPinX", Math.min(68 / PIXELS_PER_INCH, width / 2), `MIN(${number(68 / PIXELS_PER_INCH)},Width*0.5)`) + cell("TxtPinY", height / 2, "Height*0.5") + cell("TxtLocPinX", Math.min(1.25, width) / 2, "TxtWidth*0.5") + cell("TxtLocPinY", (height - 0.15) / 2, "TxtHeight*0.5") }));
   }
   for (const node of layout.nodes) {
     const step = steps.get(node.id);
@@ -301,7 +323,7 @@ export async function generateVsdx(project: Project): Promise<Uint8Array> {
   ]));
   zip.file("visio/document.xml", `${XML_HEADER}<VisioDocument xmlns="${VISIO_NS}" xmlns:r="${OFFICE_REL_NS}" xml:space="preserve"><DocumentSettings TopPage="0" DefaultTextStyle="0" DefaultLineStyle="0" DefaultFillStyle="0"><GlueSettings>9</GlueSettings><SnapSettings>65847</SnapSettings></DocumentSettings><FaceNames><FaceName NameU="Calibri"/></FaceNames><StyleSheets><StyleSheet ID="0" NameU="No Style" Name="No Style">${cell("LinePattern", 1)}${cell("LineWeight", 0.013889)}${cell("LineColor", "#24344B")}${cell("FillForegnd", "#FFFFFF")}${cell("FillPattern", 1)}${cell("VerticalAlign", 1)}${characterSection()}</StyleSheet></StyleSheets></VisioDocument>`);
   zip.file("visio/_rels/document.xml.rels", relationships([{ id: "rId1", type: `${VISIO_REL_NS}/pages`, target: "pages/pages.xml" }]));
-  zip.file("visio/pages/pages.xml", `${XML_HEADER}<Pages xmlns="${VISIO_NS}" xmlns:r="${OFFICE_REL_NS}"><Page ID="0" Name="${escapeXml(project.name || "İş axını")}" NameU="Page-1" IsCustomName="1" IsCustomNameU="0" ViewScale="0.75" ViewCenterX="${number(pageWidth / 2)}" ViewCenterY="${number(pageHeight / 2)}"><PageSheet LineStyle="0" FillStyle="0" TextStyle="0">${cell("PageWidth", pageWidth)}${cell("PageHeight", pageHeight)}${cell("PageScale", 1, undefined, "IN")}${cell("DrawingScale", 1, undefined, "IN")}${cell("DrawingSizeType", 0)}${cell("DrawingScaleType", 0)}${cell("InhibitSnap", 0)}</PageSheet><Rel r:id="rId1"/></Page></Pages>`);
+  zip.file("visio/pages/pages.xml", `${XML_HEADER}<Pages xmlns="${VISIO_NS}" xmlns:r="${OFFICE_REL_NS}"><Page ID="0" Name="${escapeAttribute(project.name || "İş axını")}" NameU="Page-1" IsCustomName="1" IsCustomNameU="0" ViewScale="0.75" ViewCenterX="${number(pageWidth / 2)}" ViewCenterY="${number(pageHeight / 2)}"><PageSheet LineStyle="0" FillStyle="0" TextStyle="0">${cell("PageWidth", pageWidth)}${cell("PageHeight", pageHeight)}${cell("PageScale", 1, undefined, "IN")}${cell("DrawingScale", 1, undefined, "IN")}${cell("DrawingSizeType", 0)}${cell("DrawingScaleType", 0)}${cell("InhibitSnap", 0)}</PageSheet><Rel r:id="rId1"/></Page></Pages>`);
   zip.file("visio/pages/_rels/pages.xml.rels", relationships([{ id: "rId1", type: `${VISIO_REL_NS}/page`, target: "page1.xml" }]));
   zip.file("visio/pages/page1.xml", `${XML_HEADER}<PageContents xmlns="${VISIO_NS}" xmlns:r="${OFFICE_REL_NS}" xml:space="preserve"><Shapes>${shapes.join("")}</Shapes><Connects>${connections.join("")}</Connects></PageContents>`);
   zip.file("docProps/core.xml", `${XML_HEADER}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escapeXml(project.name)}</dc:title><dc:creator>Visio Generator</dc:creator><dc:description>Redaktə olunan iş axını diaqramı</dc:description><cp:lastModifiedBy>Visio Generator</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>`);

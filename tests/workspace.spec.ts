@@ -3,6 +3,7 @@ import { expect, test, type Page, type Download } from "@playwright/test";
 import JSZip from "jszip";
 import { XMLValidator } from "fast-xml-parser";
 import type { Project } from "../lib/types";
+import { FILE_SIZE_LABEL, MAX_FILE_SIZE } from "../lib/storage";
 
 const STORAGE_PREFIX = "visioflow:v1:";
 
@@ -201,9 +202,43 @@ test("JSON imports create an independent draft and reject invalid files", async 
   await fileInput.setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer: Buffer.from('{"version":99,"name":"invalid"}') });
   await expect(page.getByRole("status")).toContainText("Bu fayl etibarlı VisioFlow layihəsi deyil.");
   expect(await savedProject(page)).toEqual(restored);
-  await fileInput.setInputFiles({ name: "too-large.json", mimeType: "application/json", buffer: Buffer.alloc(2_000_001, 32) });
-  await expect(page.getByRole("status")).toContainText("Fayl maksimum 2 MB ola bilər.");
+  // Exercise the UI's size gate without allocating a 100 MB upload.
+  await page.evaluate((maximum) => {
+    const originalSize = Object.getOwnPropertyDescriptor(Blob.prototype, "size")!.get!;
+    Object.defineProperty(File.prototype, "size", { configurable: true, get: function (this: File) {
+      return this.name === "too-large.json" ? maximum + 1 : originalSize.call(this);
+    } });
+  }, MAX_FILE_SIZE);
+  await fileInput.setInputFiles({ name: "too-large.json", mimeType: "application/json", buffer: Buffer.from("{}") });
+  await expect(page.getByRole("status")).toContainText(`Fayl maksimum ${FILE_SIZE_LABEL} ola bilər.`);
   expect(await savedProject(page)).toEqual(restored);
+});
+
+test("valid Unicode JSON backups above 2 MB import and survive reload", async ({ page }) => {
+  await openWorkspace(page);
+  const large: Project = {
+    version: 1, id: "unicode-project", name: "Geniş Azərbaycan dilində proses",
+    pools: [{ id: "unicode-pool", name: "Təşkilat", lanes: [{ id: "unicode-lane", name: "Operator" }] }],
+    steps: Array.from({ length: 120 }, (_, index) => ({
+      id: `unicode-step-${index}`, laneId: "unicode-lane", type: index === 0 ? "start" : index === 119 ? "end" : "task",
+      title: `Addım ${index + 1}`, description: "ə".repeat(10_000), routes: index === 119 ? [] : [{ targetId: `unicode-step-${index + 1}`, label: "" }],
+    })),
+  };
+  const bytes = Buffer.from(JSON.stringify(large));
+  expect(bytes.length).toBeGreaterThan(2_000_000);
+  await page.getByLabel("JSON layihə faylı", { exact: true }).setInputFiles({ name: "unicode.json", mimeType: "application/json", buffer: bytes });
+  await expect(page.getByLabel("Prosesin adı")).toHaveValue(large.name);
+  await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(120);
+  const saved = await savedProject(page);
+  expect(saved.steps[50].description.length).toBe(10_000);
+  expect(saved.steps[50].description.slice(0, 5)).toBe("əəəəə");
+  await page.reload();
+  await expect(page.getByLabel("Prosesin adı")).toHaveValue(large.name);
+  const restored = await savedProject(page);
+  expect(restored.id).toBe(saved.id);
+  expect(restored.steps).toHaveLength(120);
+  expect(restored.steps[119].description.length).toBe(10_000);
+  expect(restored.steps[119].description.slice(-5)).toBe("əəəəə");
 });
 
 test("an unfinished route remains editable after autosave and reload", async ({ page }) => {
@@ -231,6 +266,44 @@ test("an unfinished route remains editable after autosave and reload", async ({ 
   await expect(page.getByText("Struktur yoxlaması tamamlandı", { exact: true })).toBeVisible();
 });
 
+test("SVG downloads keep their full size and omit editor selection at every zoom", async ({ page }) => {
+  await openWorkspace(page);
+  await openSample(page);
+  const node = page.locator("#process-diagram").getByRole("button", { name: "Başlanğıc: Yeni sənəd", exact: true });
+  const originalStroke = await node.locator("circle").first().getAttribute("stroke");
+  await node.focus();
+  await node.press("Enter");
+  await expect(node).toHaveAttribute("aria-pressed", "true");
+  const dimensions = await page.locator("#process-diagram").evaluate((svg) => {
+    const [, , width, height] = svg.getAttribute("viewBox")!.split(/\s+/).map(Number);
+    return { width, height };
+  });
+  for (const changeZoom of ["Bütün diaqramı ekrana sığdır", "Diaqramı böyüt"]) {
+    await page.getByRole("button", { name: changeZoom, exact: true }).click();
+    const contents = (await downloadBytes(await exportDownload(page, /Vektor diaqramı/))).toString("utf8");
+    const exported = await page.evaluate((text) => {
+      const svg = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
+      return { width: Number(svg.getAttribute("width")), height: Number(svg.getAttribute("height")), halos: svg.querySelectorAll("[data-editor-only]").length, startStroke: svg.querySelector('[data-step-id="start"] circle')?.getAttribute("stroke") };
+    }, contents);
+    expect(exported).toEqual({ ...dimensions, halos: 0, startStroke: originalStroke });
+  }
+});
+
+test("zooming respects deliberate panning after keyboard selection", async ({ page }) => {
+  await openWorkspace(page);
+  await openSample(page);
+  const node = page.locator("#process-diagram").getByRole("button", { name: "Son: İcra olunub", exact: true });
+  await node.focus();
+  await node.press("Space");
+  await expect(node).toHaveAttribute("aria-pressed", "true");
+  await expect(node).toBeInViewport({ ratio: 1 });
+  const viewport = page.locator(".diagram-viewport");
+  await viewport.evaluate((element) => { element.scrollLeft = 0; element.scrollTop = 0; });
+  await page.getByRole("button", { name: "Diaqramı böyüt", exact: true }).click();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft < element.scrollWidth / 2 && element.scrollTop < element.scrollHeight / 2)).toBe(true);
+  await expect(node).toHaveAttribute("aria-pressed", "true");
+});
+
 test.describe("mobile layout", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -253,7 +326,46 @@ test.describe("mobile layout", () => {
     const viewport = page.locator(".diagram-viewport");
     expect(await viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     await page.getByRole("button", { name: "Bütün diaqramı ekrana sığdır", exact: true }).click();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1)).toBe(true);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("mobile-workspace.png"), fullPage: true });
+  });
+
+  test("fit handles the maximum-size flow and keyboard or pointer panning remains usable", async ({ page }) => {
+    await openWorkspace(page);
+    const large: Project = {
+      version: 1, id: "large-project", name: "Uzun iş axını",
+      pools: [{ id: "large-pool", name: "Təşkilat", lanes: [{ id: "large-lane", name: "Operator" }] }],
+      steps: Array.from({ length: 200 }, (_, index) => ({
+        id: `large-step-${index}`, laneId: "large-lane", type: index === 0 ? "start" : index === 199 ? "end" : "task",
+        title: `Addım ${index + 1}`, description: "", routes: index === 199 ? [] : [{ targetId: `large-step-${index + 1}`, label: "" }],
+      })),
+    };
+    await page.getByLabel("JSON layihə faylı", { exact: true }).setInputFiles({ name: "large.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(large)) });
+    await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(200);
+    const viewport = page.locator(".diagram-viewport");
+    await page.getByRole("button", { name: "Bütün diaqramı ekrana sığdır", exact: true }).click();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+    await page.getByRole("button", { name: "Diaqramı böyüt", exact: true }).click();
+    await viewport.scrollIntoViewIfNeeded();
+    await viewport.focus();
+    await expect(viewport).toBeFocused();
+    const beforeKeyboard = await viewport.evaluate((element) => element.scrollLeft);
+    await viewport.press("ArrowRight");
+    await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(beforeKeyboard);
+    const area = await viewport.boundingBox();
+    const beforeDrag = await viewport.evaluate((element) => element.scrollLeft);
+    await page.mouse.move(area!.x + 140, area!.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(area!.x + 40, area!.y + 10, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(beforeDrag + 50);
+    await expect(viewport).toHaveCSS("cursor", "grab");
+    await page.getByLabel("JSON layihə faylı", { exact: true }).setInputFiles({ name: "another.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ ...large, name: "Başqa iş axını" })) });
+    await expect(page.getByLabel("Prosesin adı")).toHaveValue("Başqa iş axını");
+    await expect(page.locator(".diagram-toolbar [aria-live='polite']")).toHaveText("80%");
+    await expect.poll(() => viewport.evaluate((element) => element.scrollLeft === 0 && element.scrollTop === 0)).toBe(true);
   });
 });

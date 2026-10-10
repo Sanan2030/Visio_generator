@@ -162,7 +162,9 @@ export function validateProject(project: Project): ValidationIssue[] {
       if (seenRoutes.has(key)) add("warning", `“${step.title}” addımında eyni keçid təkrarlanır.`, step.id);
       seenRoutes.add(key);
       if (!ARTIFACT_TYPES.has(step.type) && !ARTIFACT_TYPES.has(byId.get(route.targetId)!.type)) {
-        incoming.set(route.targetId, [...(incoming.get(route.targetId) || []), step.id]);
+        const sources = incoming.get(route.targetId);
+        if (sources) sources.push(step.id);
+        else incoming.set(route.targetId, [step.id]);
       }
       if (route.targetId === step.id) add("warning", `“${step.title}” özünə qayıdır; dövrün çıxış şərtini yoxlayın.`, step.id);
     }
