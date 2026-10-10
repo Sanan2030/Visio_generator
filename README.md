@@ -1,14 +1,14 @@
 # VisioFlow
 
-Azərbaycan dilində, cədvəldə yazılan iş axınını canlı diaqrama çevirən veb alət. Next.js və React ilə hazırlanıb; Vercel-də yerləşdirilə bilər.
+Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevirən veb alət. Qaranlıq iş məkanında forma solda, bütün axının görünüşü sağda yerləşir. Next.js və React ilə hazırlanıb; Vercel-də yerləşdirilə bilər.
 
 ## İş ardıcıllığı
 
-1. Prosesin adını və pool sayını daxil et. Hər pool iştirakçı təşkilatı/sistemi, daxilindəki lane-lər isə rolları göstərir.
-2. Addımları cədvəldə yaz: ad, element növü və icraçı. Sətirin “Təsvir və keçidlər” hissəsində biznes qaydalarını və növbəti addımları göstər.
-3. XOR üçün bir yol, OR üçün bir və ya bir neçə yol, AND üçün bütün paralel yollar nəzərdə tutulur. Keçidə şərt yaz və hədəfi seç; əvvəlki addımlara dönüş də mümkündür.
-4. Canlı diaqramda elementə kliklə və ya klaviatura ilə seç. Böyütmə, kiçiltmə, sürüşdürmə və ekrana sığdırma var.
-5. “İzah və yoxlama” bölməsində əlaqələri yoxla və “Yüklə” menyusundan faylı seç.
+1. **İştirakçılar** formasında prosesin adını və pool sayını daxil et. Hər pool iştirakçı təşkilatı/tərəfi, daxilindəki lane-lər isə icraçı rollarını göstərir.
+2. **Addımlar** bölməsində başlanğıc, tapşırıqlar və son hadisəsi əlavə et. Hər addımın kartını açaraq adını, element növünü, icraçısını və istəyə bağlı iş təsvirini doldur. Bir anda bir addımın forması açıq olur.
+3. Addımın hədəfini və keçid şərtini seç. XOR bir yol, OR bir və ya bir neçə uyğun yol, AND isə bütün paralel yollar üçündür. Əvvəlki addımlara qayıtmaq və bir neçə qol yaratmaq mümkündür.
+4. Sağdakı canlı diaqram dəyişiklikləri dərhal göstərir və ilkin olaraq bütün axını ekrana sığdırır. Elementə kliklə və ya klaviatura ilə seçərək onun formasını aç. Böyütmə, kiçiltmə, sürüşdürmə və tam ekran rejimi var.
+5. **İzah** bölməsində əlaqələri yoxla. **Visio üçün yüklə** düyməsi redaktə olunan `.vsdx` faylı yaradır. İzahı ayrıca **Mətn yüklə** ilə əldə etmək olar.
 
 ## İlk versiyada olanlar
 
@@ -17,14 +17,19 @@ Azərbaycan dilində, cədvəldə yazılan iş axınını canlı diaqrama çevir
 - Eyni pool daxilində ardıcıl axın, pool-lar arasında mesaj axını, sənəd/qeyd üçün nöqtəli əlaqə.
 - Struktura əsaslanan Azərbaycan dilində izah; əlaqəsiz addımlar, olmayan hədəflər, başlanğıc/son və qərar şərtləri barədə yoxlama.
 - İstifadəçinin verdiyi “Müştəri müraciətləri” nümunəsi: operator, vizaçı, aidiyyəti şəxslər, icraçılar, imtina/düzəliş dövrü, paralel ünvanlanma və QNV statusları. İmzalama nümunədə Vizaçı lane-indədir; ayrıca rol əlavə edib dəyişmək olar.
-- Redaktə olunan **.vsdx**, **.svg**, layihə ehtiyat nüsxəsi **.json**, izah **.txt** ixracı; JSON importu.
-- Hesabsız istifadə, brauzerdə avtomatik yadda saxlama, son dəyişiklikləri geri alma, təsdiqli “Hər şeyi sil”.
+- Visio-da ayrı-ayrı seçilib redaktə olunan fiqurlarla **.vsdx** ixracı və izah üçün **.txt** yükləmə.
+- Hesabsız istifadə, brauzerdə dərhal avtomatik yadda saxlama, son 30 dəyişikliyi geri alma və təsdiqli **Hər şeyi sil**.
+- Dar ekranlarda formanın altında ayrıca sürüşdürülən diaqram; tam ekran rejimi ilə axına geniş baxış.
 
 ## Yadda saxlama
 
-Məlumat serverə göndərilmir. Layihə `localStorage`-da `visioflow:v1:<id>` açarı ilə saxlanılır; URL-dəki `#<id>` həmin brauzerdə onu bərpa edir. Hash silindikdə yeni boş layihə yaranır. Eyni link başqa cihazda məlumatı bərpa etmir. Başqa cihazda davam etmək və brauzer yaddaşı təmizlənməsinə qarşı qorumaq üçün JSON yüklə.
+Layihə məlumatı serverə göndərilmir. Hər dəyişiklik həmin anda `localStorage`-da `visioflow:v1:<id>` açarı ilə saxlanılır; URL-dəki `#<id>` həmin brauzerdə onu bərpa edir. Səhifəni yeniləyəndə, bağlayıb eyni ünvanı açanda və ya əvvəlki versiyada yaratdığın layihənin hash ünvanına keçəndə işinə davam edə bilərsən. Hash silindikdə yeni boş layihə yaranır.
 
-“Hər şeyi sil” təsdiqdən sonra yalnız bu alətin yerli layihə açarlarını silir. Yeni diaqram və ya nümunə açmaq əvvəlki layihənin açarını saxlayır. Brauzer yerli yaddaşı bloklayarsa və ya yaddaş dolarsa interfeys bunu göstərir; saxlanılmamış dəyişikliklər başqa layihə açmazdan əvvəl xəbərdarlıq və JSON ehtiyat nüsxəsi ilə qorunur. Silmə uğursuz olarsa hazırkı layihə açıq qalır. Fayl oxunarkən edilən dəyişikliklər gecikmiş importla əvəz edilmir.
+Hash layihənin identifikatorudur; məlumatın özü brauzerdə qalır. Eyni link başqa cihazda və ya başqa sayt domenində məlumatı bərpa etmir. Brauzerin sayt məlumatları təmizlənəndə saxlanmış layihələr də silinir. İnterfeysdə JSON yükləmə və açma yoxdur.
+
+Yuxarıdakı **Saxlanıldı** statusu uğurlu yadda saxlama deməkdir. Brauzer yerli yaddaşı bloklayarsa və ya yaddaş dolarsa **Yaddaş əlçatan deyil** göstərilir; cari dəyişikliklər açıq səhifədə qalır. Yeni diaqram və ya nümunə açmaq istəyəndə saxlanılmamış işin itirilməsinə qarşı təsdiq tələb olunur. Saxlanılmamış dəyişikliklər olduqda səhifədən çıxış üçün brauzer xəbərdarlığı da verilir.
+
+**Layihə menyusu → Hər şeyi sil** təsdiqdən sonra yalnız bu alətin yerli layihə açarlarını silir. Yeni diaqram və ya nümunə açmaq əvvəlki saxlanmış layihəni öz hash ünvanında saxlayır. Silmə uğursuz olarsa hazırkı layihə açıq qalır.
 
 ## Lokal inkişaf
 
@@ -45,7 +50,7 @@ npm run build
 npm start
 ```
 
-Unit testlər proses qaydalarını, dövrlərin layout-unu, etibarsız importu və VSDX ZIP/XML strukturunu yoxlayır. Brauzer testləri redaktə, bərpa, hash sıfırlama, təsdiqli silmə və ixrac/importu yoxlayır. E2E testi `CHROMIUM_PATH` verilərsə onu, yoxdursa `/usr/bin/chromium` mövcud olduqda sistem Chromium-unu istifadə edir. Digər maşında `npx playwright install chromium` ilə brauzeri quraşdır.
+Unit testlər proses qaydalarını, dövrlərin yerləşməsini, saxlanmış layihənin strukturunu və VSDX ZIP/XML paketini yoxlayır. Brauzer testləri forma redaktəsi, dərhal bərpa, hash sıfırlama, yaddaş nasazlığı, təsdiqli silmə, Visio ixracı və mobil diaqram idarəsini yoxlayır. E2E testi `CHROMIUM_PATH` verilərsə onu, yoxdursa `/usr/bin/chromium` mövcud olduqda sistem Chromium-unu istifadə edir. Digər maşında `npx playwright install chromium` ilə brauzeri quraşdır.
 
 ## Vercel
 
@@ -67,7 +72,7 @@ Unit testlər proses qaydalarını, dövrlərin layout-unu, etibarsız importu v
 
 6. **Deploy** düyməsini bas. Build tamamlanıb **Ready** olduqda Vercel-in verdiyi `.vercel.app` ünvanını aç.
 7. Layihənin **Settings → Git** bölməsində **Production Branch** dəyərinin `main` olduğunu yoxla. Sonrakı `main` push-ları avtomatik yeni production deploy yaradacaq.
-8. Saytda **Nümunə proses** aç, bir xananı dəyiş, səhifəni yenilə və yaddaşın bərpasını yoxla. **Yüklə → Microsoft Visio** ilə `.vsdx` faylını yüklə.
+8. Saytda **Nümunə** aç, **Addımlar** bölməsində bir formanı dəyiş, səhifəni yenilə və yaddaşın bərpasını yoxla. **Visio üçün yüklə** ilə `.vsdx` faylını yüklə.
 
 Bu versiya hesab, verilənlər bazası və AI açarı tələb etmir. Deploy uğursuz olarsa **Deployment → Build Logs** bölməsini aç: Node versiyası `24.x`, repository kökü isə `./` olmalıdır.
 
@@ -79,6 +84,6 @@ Bu, əsas BPMN elementləri ilə diaqram redaktorudur; biznes prosesini icra ed�
 
 VSDX native fiqurlar, Unicode mətn və əlaqəli birləşdiricilərdən ibarətdir. ZIP/XML struktur testləri və LibreOffice import/conversion yoxlaması var. Microsoft Visio Desktop/Web-də açmaq, fiquru dəyişmək və birləşdiricini yoxlamaq ayrıca əl ilə qəbul sınağı tələb edir.
 
-**Sloth AI hazırda qoşulmayıb.** İstifadə yeri və API müqaviləsi dəqiqləşəndən sonra inteqrasiya ayrıca əlavə edilə bilər. Hazırkı izah xarici AI çağırışı etmədən, cədvəlin məlumatlarından qaydalar əsasında hazırlanır.
+**Sloth AI hazırda qoşulmayıb.** İstifadə yeri və API müqaviləsi dəqiqləşəndən sonra inteqrasiya ayrıca əlavə edilə bilər. Hazırkı izah xarici AI çağırışı etmədən, formaya daxil edilən məlumatlardan qaydalar əsasında hazırlanır.
 
-İdxal olunan layihələr maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element ilə məhdudlaşdırılır. JSON maksimum 100 MB-dır; limit UTF-8 baytları ilə hesablanır və geniş təsvirli layihələrin ehtiyat nüsxələrini yenidən açmağa imkan verir. Brauzerin yerli yaddaş limiti ayrıca tətbiq olunur; böyük layihələrdə JSON ehtiyat nüsxəsini yüklə. Faylın strukturunun düzgünlüyü ayrıca yoxlanılır, yarımçıq layihələr import oluna bilər.
+Bir layihədə maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element mümkündür. Natamam addımlar da avtomatik saxlanılır; Visio faylını yükləmək üçün struktur xətaları düzəldilməlidir. Brauzerin yerli yaddaş tutumu ayrıca məhdudiyyət yaradır. Elementləri tətbiqdə sürükləyərək yerini dəyişmək funksiyası yoxdur; yerləşmə avtomatik hesablanır, əl ilə düzəlişləri Visio-da etmək olar.

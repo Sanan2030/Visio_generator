@@ -1,44 +1,45 @@
 import { readFile } from "node:fs/promises";
-import { expect, test, type Page, type Download } from "@playwright/test";
+import { expect, test, type Download, type Page } from "@playwright/test";
 import JSZip from "jszip";
 import { XMLValidator } from "fast-xml-parser";
 import type { Project } from "../lib/types";
-import { FILE_SIZE_LABEL, MAX_FILE_SIZE } from "../lib/storage";
 
 const STORAGE_PREFIX = "visioflow:v1:";
 
 async function openWorkspace(page: Page) {
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "Yüklə", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Visio üçün yüklə", exact: true })).toBeEnabled();
   await expect(page).toHaveURL(/#[a-zA-Z0-9_-]+$/);
 }
 
 async function savedProject(page: Page): Promise<Project> {
-  await expect.poll(() => page.evaluate((prefix) => {
-    const text = localStorage.getItem(prefix + window.location.hash.slice(1));
-    return text ? JSON.parse(text) : null;
-  }, STORAGE_PREFIX)).not.toBeNull();
-  await expect(page.locator(".save-status")).toHaveText("Brauzerdə saxlanıldı");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanıldı");
   return page.evaluate((prefix) => JSON.parse(localStorage.getItem(prefix + window.location.hash.slice(1))!), STORAGE_PREFIX);
 }
 
-async function openSteps(page: Page) {
-  await page.getByRole("navigation", { name: "Layihə bölmələri" }).getByRole("button", { name: /Proses addımları/ }).click();
+async function openSection(page: Page, name: "İştirakçılar" | "Addımlar" | "İzah") {
+  await page.getByRole("navigation", { name: "Proses forması" }).getByRole("button", { name: new RegExp(name) }).click();
+}
+
+async function openStep(page: Page, index: number) {
+  await openSection(page, "Addımlar");
+  const summary = page.getByRole("button", { name: `${index}-ci addımı aç`, exact: true });
+  if ((await summary.getAttribute("aria-expanded")) !== "true") await summary.click();
+  await expect(page.getByLabel(`${index}-ci addımın adı`, { exact: true })).toBeVisible();
 }
 
 async function openSample(page: Page) {
   await page.getByRole("button", { name: "Nümunə proses", exact: true }).click();
   const confirmation = page.getByRole("dialog");
   if (await confirmation.isVisible()) await confirmation.getByRole("button", { name: "Nümunəni aç", exact: true }).click();
+  await openSection(page, "İştirakçılar");
   await expect(page.getByLabel("Prosesin adı")).toHaveValue("Müştəri müraciətləri");
   await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(20);
 }
 
-async function exportDownload(page: Page, name: RegExp): Promise<Download> {
-  await page.getByRole("button", { name: "Yüklə", exact: true }).click();
-  const download = page.waitForEvent("download");
-  await page.getByRole("button", { name }).click();
-  return download;
+async function resetDialog(page: Page) {
+  await page.getByRole("button", { name: "Layihə menyusu", exact: true }).click();
+  await page.getByRole("button", { name: "Hər şeyi sil", exact: true }).click();
 }
 
 async function downloadBytes(download: Download) {
@@ -48,7 +49,45 @@ async function downloadBytes(download: Download) {
   return readFile(path!);
 }
 
-test("table editing builds a connected live flow and restores it after reload", async ({ page }) => {
+async function seedProject(page: Page, project: Project) {
+  await page.addInitScript(({ prefix, saved }) => {
+    localStorage.setItem(prefix + saved.id, JSON.stringify(saved));
+  }, { prefix: STORAGE_PREFIX, saved: project });
+  await page.goto(`/#${project.id}`);
+  await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(project.steps.length);
+  expect((await savedProject(page)).name).toBe(project.name);
+}
+
+function longProject(count = 200): Project {
+  return {
+    version: 1, id: "large-project", name: "Uzun iş axını",
+    pools: [{ id: "large-pool", name: "Təşkilat", lanes: [{ id: "large-lane", name: "Operator" }] }],
+    steps: Array.from({ length: count }, (_, index) => ({
+      id: `large-step-${index}`, laneId: "large-lane", type: index === 0 ? "start" : index === count - 1 ? "end" : "task",
+      title: `Addım ${index + 1}`, description: "", routes: index === count - 1 ? [] : [{ targetId: `large-step-${index + 1}`, label: "" }],
+    })),
+  };
+}
+
+test("the dark workspace presents a form beside a large canvas without JSON controls", async ({ page }, testInfo) => {
+  await openWorkspace(page);
+  await expect(page.getByRole("navigation", { name: "Proses forması" }).getByRole("button")).toHaveCount(3);
+  await expect(page.locator("input[type='file']")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /JSON/i })).toHaveCount(0);
+  await expect(page.locator("table")).toHaveCount(0);
+  const form = await page.getByRole("navigation", { name: "Proses forması" }).boundingBox();
+  const canvas = await page.locator(".diagram-viewport").boundingBox();
+  expect(canvas!.x).toBeGreaterThan(form!.x + form!.width - 1);
+  expect(canvas!.width).toBeGreaterThan(form!.width);
+  expect(canvas!.height).toBeGreaterThan(650);
+  expect(await page.evaluate(() => {
+    const colors = getComputedStyle(document.body).backgroundColor.match(/\d+/g)!.slice(0, 3).map(Number);
+    return colors.every((value) => value < 60);
+  })).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("dark-form-workspace.png"), fullPage: true });
+});
+
+test("form editing builds a connected live flow and restores every field after reload", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await openWorkspace(page);
@@ -63,8 +102,7 @@ test("table editing builds a connected live flow and restores it after reload", 
   await page.getByLabel("Pool 2 icraçı 1", { exact: true }).fill("Bank");
   await expect(page.getByLabel("Pool sayı", { exact: true })).toHaveValue("2");
   await expect(page.locator("#process-diagram")).toContainText("Vizaçı");
-
-  await openSteps(page);
+  await openSection(page, "Addımlar");
   await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
   await page.getByRole("button", { name: "Addım əlavə et", exact: true }).click();
   await page.getByLabel("2-ci addımın adı", { exact: true }).fill("Sənədi təsdiqlə");
@@ -76,31 +114,33 @@ test("table editing builds a connected live flow and restores it after reload", 
   await page.getByLabel("3-ci addımın növü", { exact: true }).selectOption("serviceTask");
   await page.getByLabel("3-ci addımın icraçısı", { exact: true }).selectOption({ label: "Tərəfdaş / Bank" });
   await page.getByRole("button", { name: "Son hadisəsi", exact: true }).click();
+  await expect(page.locator(".step-card")).toHaveCount(4);
   await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(4);
-  await expect(page.locator(".editor-footer")).toContainText("4 element · 3 keçid");
   await expect(page.locator("#process-diagram path[stroke-dasharray='6 5']")).toHaveCount(2);
-
   const taskNode = page.locator("#process-diagram").getByRole("button", { name: "İstifadəçi tapşırığı: Sənədi təsdiqlə", exact: true });
   await taskNode.focus();
   await taskNode.press("Enter");
-  await expect(page.locator(".selected-row input")).toHaveValue("Sənədi təsdiqlə");
+  await expect(page.getByLabel("2-ci addımın adı", { exact: true })).toHaveValue("Sənədi təsdiqlə");
   await expect(page.getByLabel("Keçid 1 hədəfi", { exact: true }).locator("option:checked")).toHaveText("3. Cavabı göndər");
   await page.getByLabel("2-ci addımın adı", { exact: true }).fill("Sənədi yoxla");
   await expect(page.locator("#process-diagram").getByRole("button", { name: "İstifadəçi tapşırığı: Sənədi yoxla", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("Keçid 1 şərti", { exact: true }).fill("Təsdiq");
   await expect(page.locator("#process-diagram")).toContainText("Təsdiq");
-
   const before = await savedProject(page);
   expect(before.steps[0].routes[0].targetId).toBe(before.steps[1].id);
   expect(before.steps[1].routes[0]).toEqual({ targetId: before.steps[2].id, label: "Təsdiq" });
   const url = page.url();
   await page.reload();
+  await openSection(page, "İştirakçılar");
+  await expect(page.getByLabel("Prosesin adı")).toHaveValue(before.name);
+  await openStep(page, 2);
   await expect(page.getByLabel("2-ci addımın adı", { exact: true })).toHaveValue("Sənədi yoxla");
+  await expect(page.getByLabel("Addımın təsviri", { exact: true })).toHaveValue(before.steps[1].description);
   expect(page.url()).toBe(url);
   expect(await savedProject(page)).toEqual(before);
-  await page.getByRole("button", { name: /İzah və yoxlama/ }).click();
+  await openSection(page, "İzah");
   await expect(page.getByText("Struktur yoxlaması tamamlandı", { exact: true })).toBeVisible();
-  await expect(page.locator(".explanation-text")).toContainText("Vizaçı sənədin məlumatlarını yoxlayıb təsdiqləyir.");
+  await expect(page.locator(".explanation-text")).toContainText(before.steps[1].description);
   expect(pageErrors).toEqual([]);
 });
 
@@ -114,15 +154,13 @@ test("clearing the hash starts a blank project and reset requires confirmation",
   expect(blank.id).not.toBe(original.id);
   expect(blank.steps).toHaveLength(0);
   await page.evaluate((id) => { window.location.hash = id; }, original.id);
-  await expect(page.getByLabel("Prosesin adı")).toHaveValue("Saxlanmış layihə");
-  await savedProject(page);
-
-  await page.getByRole("button", { name: "Hər şeyi sil", exact: true }).click();
+  await expect(page.getByLabel("Prosesin adı")).toHaveValue(original.name);
+  await resetDialog(page);
   await expect(page.getByRole("dialog", { name: "Hər şeyi silmək istəyirsən?" })).toBeVisible();
   await page.getByRole("button", { name: "Ləğv et", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect((await savedProject(page)).id).toBe(original.id);
-  await page.getByRole("button", { name: "Hər şeyi sil", exact: true }).click();
+  await resetDialog(page);
   await page.getByRole("button", { name: "Bəli, hər şeyi sil", exact: true }).click();
   await expect(page.getByLabel("Prosesin adı")).toHaveValue("Yeni iş axını");
   const after = await savedProject(page);
@@ -135,16 +173,16 @@ test("clearing the hash starts a blank project and reset requires confirmation",
   expect(after.steps).toHaveLength(0);
 });
 
-test("the example passes validation and downloads real VSDX, JSON and SVG files", async ({ page }) => {
+test("the example downloads editable native Visio shapes and the process explanation", async ({ page }) => {
   await openWorkspace(page);
   await openSample(page);
-  const project = await savedProject(page);
-  await page.getByRole("button", { name: /İzah və yoxlama/ }).click();
+  await openSection(page, "İzah");
   await expect(page.getByText("Struktur yoxlaması tamamlandı", { exact: true })).toBeVisible();
   await expect(page.locator(".issue-list .error")).toHaveCount(0);
   await expect(page.locator(".explanation-text")).toContainText("İmtina");
-
-  const vsdxDownload = await exportDownload(page, /Microsoft Visio/);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Visio üçün yüklə", exact: true }).click();
+  const vsdxDownload = await download;
   expect(vsdxDownload.suggestedFilename()).toMatch(/\.vsdx$/);
   const vsdx = await downloadBytes(vsdxDownload);
   expect(vsdx.subarray(0, 2).toString()).toBe("PK");
@@ -156,146 +194,104 @@ test("the example passes validation and downloads real VSDX, JSON and SVG files"
   expect(pageXml).toContain("Əsas məlumatları doldur");
   expect(pageXml).toContain("<Connects>");
   expect(pageXml.match(/<Row N="ProjectStepId">/g)).toHaveLength(20);
-
-  const jsonDownload = await exportDownload(page, /Layihənin ehtiyat nüsxəsi/);
-  expect(jsonDownload.suggestedFilename()).toMatch(/\.json$/);
-  expect(JSON.parse((await downloadBytes(jsonDownload)).toString("utf8"))).toEqual(project);
-
-  const svgDownload = await exportDownload(page, /Vektor diaqramı/);
-  expect(svgDownload.suggestedFilename()).toMatch(/\.svg$/);
-  const svg = (await downloadBytes(svgDownload)).toString("utf8");
-  expect(XMLValidator.validate(svg)).toBe(true);
-  expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
-  expect(svg.match(/data-step-id=/g)).toHaveLength(20);
-  expect(svg).toContain("Operator");
-  expect(svg).not.toContain("<script");
+  const textDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Mətn yüklə", exact: true }).click();
+  const text = await textDownload;
+  expect(text.suggestedFilename()).toMatch(/\.txt$/);
+  expect((await downloadBytes(text)).toString("utf8")).toBe(await page.locator(".explanation-text").innerText());
 });
 
-test("invalid flows block diagram export while JSON backups remain available", async ({ page }) => {
+test("invalid flows open the review section and block Visio export", async ({ page }) => {
   await openWorkspace(page);
-  await openSteps(page);
+  await openSection(page, "Addımlar");
   await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
   const downloads: Download[] = [];
   page.on("download", (file) => downloads.push(file));
-  await page.getByRole("button", { name: "Yüklə", exact: true }).click();
-  await page.getByRole("button", { name: /Microsoft Visio/ }).click();
-  await expect(page.getByRole("status")).toContainText("İxracdan əvvəl yoxlamadakı xətaları düzəlt.");
+  await page.getByRole("button", { name: "Visio üçün yüklə", exact: true }).click();
+  await expect(page.locator(".toast")).toContainText("Visio faylını yükləmək üçün göstərilən xətaları düzəlt.");
   await expect(page.locator(".validation-card.has-errors")).toBeVisible();
   expect(downloads).toHaveLength(0);
-  const backup = await exportDownload(page, /Layihənin ehtiyat nüsxəsi/);
-  expect(JSON.parse((await downloadBytes(backup)).toString("utf8")).steps).toHaveLength(1);
+  expect((await savedProject(page)).steps).toHaveLength(1);
 });
 
-test("JSON imports create an independent draft and reject invalid files", async ({ page }) => {
+test("unfinished routes survive autosave and become valid after choosing their target", async ({ page }) => {
   await openWorkspace(page);
   await openSample(page);
-  const original = await savedProject(page);
-  const imported: Project = { ...original, name: "İdxal edilmiş proses", steps: original.steps.map((step) => ({ ...step })) };
-  const fileInput = page.getByLabel("JSON layihə faylı", { exact: true });
-  await fileInput.setInputFiles({ name: "proses.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(imported)) });
-  await expect(page.getByLabel("Prosesin adı")).toHaveValue("İdxal edilmiş proses");
-  const restored = await savedProject(page);
-  expect(restored.id).not.toBe(original.id);
-  expect(restored.steps).toEqual(imported.steps);
-  expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_PREFIX + original.id)).not.toBeNull();
-
-  await fileInput.setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer: Buffer.from('{"version":99,"name":"invalid"}') });
-  await expect(page.getByRole("status")).toContainText("Bu fayl etibarlı VisioFlow layihəsi deyil.");
-  expect(await savedProject(page)).toEqual(restored);
-  // Exercise the UI's size gate without allocating a 100 MB upload.
-  await page.evaluate((maximum) => {
-    const originalSize = Object.getOwnPropertyDescriptor(Blob.prototype, "size")!.get!;
-    Object.defineProperty(File.prototype, "size", { configurable: true, get: function (this: File) {
-      return this.name === "too-large.json" ? maximum + 1 : originalSize.call(this);
-    } });
-  }, MAX_FILE_SIZE);
-  await fileInput.setInputFiles({ name: "too-large.json", mimeType: "application/json", buffer: Buffer.from("{}") });
-  await expect(page.getByRole("status")).toContainText(`Fayl maksimum ${FILE_SIZE_LABEL} ola bilər.`);
-  expect(await savedProject(page)).toEqual(restored);
-});
-
-test("valid Unicode JSON backups above 2 MB import and survive reload", async ({ page }) => {
-  await openWorkspace(page);
-  const large: Project = {
-    version: 1, id: "unicode-project", name: "Geniş Azərbaycan dilində proses",
-    pools: [{ id: "unicode-pool", name: "Təşkilat", lanes: [{ id: "unicode-lane", name: "Operator" }] }],
-    steps: Array.from({ length: 120 }, (_, index) => ({
-      id: `unicode-step-${index}`, laneId: "unicode-lane", type: index === 0 ? "start" : index === 119 ? "end" : "task",
-      title: `Addım ${index + 1}`, description: "ə".repeat(10_000), routes: index === 119 ? [] : [{ targetId: `unicode-step-${index + 1}`, label: "" }],
-    })),
-  };
-  const bytes = Buffer.from(JSON.stringify(large));
-  expect(bytes.length).toBeGreaterThan(2_000_000);
-  await page.getByLabel("JSON layihə faylı", { exact: true }).setInputFiles({ name: "unicode.json", mimeType: "application/json", buffer: bytes });
-  await expect(page.getByLabel("Prosesin adı")).toHaveValue(large.name);
-  await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(120);
-  const saved = await savedProject(page);
-  expect(saved.steps[50].description.length).toBe(10_000);
-  expect(saved.steps[50].description.slice(0, 5)).toBe("əəəəə");
-  await page.reload();
-  await expect(page.getByLabel("Prosesin adı")).toHaveValue(large.name);
-  const restored = await savedProject(page);
-  expect(restored.id).toBe(saved.id);
-  expect(restored.steps).toHaveLength(120);
-  expect(restored.steps[119].description.length).toBe(10_000);
-  expect(restored.steps[119].description.slice(-5)).toBe("əəəəə");
-});
-
-test("an unfinished route remains editable after autosave and reload", async ({ page }) => {
-  await openWorkspace(page);
-  await openSample(page);
-  await page.getByRole("button", { name: "1-ci addımın keçidləri", exact: true }).click();
+  await openStep(page, 1);
   await page.getByLabel("Keçid 1 hədəfi", { exact: true }).selectOption("");
   const draft = await savedProject(page);
   expect(draft.steps[0].routes[0].targetId).toBe("");
   const draftUrl = page.url();
   await page.reload();
-  await expect(page.getByLabel("Prosesin adı")).toHaveValue("Müştəri müraciətləri");
+  await openSection(page, "İştirakçılar");
+  await expect(page.getByLabel("Prosesin adı")).toHaveValue(draft.name);
   await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(20);
   expect(page.url()).toBe(draftUrl);
   expect(await savedProject(page)).toEqual(draft);
-  await page.getByRole("button", { name: "1-ci addımın keçidləri", exact: true }).click();
+  await openStep(page, 1);
   await expect(page.getByLabel("Keçid 1 hədəfi", { exact: true })).toHaveValue("");
-  await page.getByRole("button", { name: /İzah və yoxlama/ }).click();
+  await openSection(page, "İzah");
   await expect(page.locator(".validation-card.has-errors")).toBeVisible();
   await expect(page.locator(".issue-list .error")).toContainText("keçidin hədəfi mövcud deyil.");
-  await openSteps(page);
-  await page.getByRole("button", { name: "1-ci addımın keçidləri", exact: true }).click();
+  await openStep(page, 1);
   await page.getByLabel("Keçid 1 hədəfi", { exact: true }).selectOption({ label: "2. Əsas məlumatları doldur" });
-  await page.getByRole("button", { name: /İzah və yoxlama/ }).click();
+  await openSection(page, "İzah");
   await expect(page.getByText("Struktur yoxlaması tamamlandı", { exact: true })).toBeVisible();
 });
 
-test("SVG downloads keep their full size and omit editor selection at every zoom", async ({ page }) => {
+test("lanes and pools containing steps are protected until the steps move", async ({ page }) => {
   await openWorkspace(page);
-  await openSample(page);
-  const node = page.locator("#process-diagram").getByRole("button", { name: "Başlanğıc: Yeni sənəd", exact: true });
-  const originalStroke = await node.locator("circle").first().getAttribute("stroke");
-  await node.focus();
-  await node.press("Enter");
-  await expect(node).toHaveAttribute("aria-pressed", "true");
-  const dimensions = await page.locator("#process-diagram").evaluate((svg) => {
-    const [, , width, height] = svg.getAttribute("viewBox")!.split(/\s+/).map(Number);
-    return { width, height };
-  });
-  for (const changeZoom of ["Bütün diaqramı ekrana sığdır", "Diaqramı böyüt"]) {
-    await page.getByRole("button", { name: changeZoom, exact: true }).click();
-    const contents = (await downloadBytes(await exportDownload(page, /Vektor diaqramı/))).toString("utf8");
-    const exported = await page.evaluate((text) => {
-      const svg = new DOMParser().parseFromString(text, "image/svg+xml").documentElement;
-      return { width: Number(svg.getAttribute("width")), height: Number(svg.getAttribute("height")), halos: svg.querySelectorAll("[data-editor-only]").length, startStroke: svg.querySelector('[data-step-id="start"] circle')?.getAttribute("stroke") };
-    }, contents);
-    expect(exported).toEqual({ ...dimensions, halos: 0, startStroke: originalStroke });
-  }
+  await page.getByLabel("Pool 1 icraçı 1", { exact: true }).fill("Operator");
+  await page.getByRole("button", { name: "İcraçı əlavə et", exact: true }).click();
+  await page.getByLabel("Pool 1 icraçı 2", { exact: true }).fill("Vizaçı");
+  await page.getByRole("button", { name: "Pool sayını artır", exact: true }).click();
+  await page.getByLabel("Pool 2 adı", { exact: true }).fill("Bank");
+  await openSection(page, "Addımlar");
+  await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
+  await openSection(page, "İştirakçılar");
+  await page.getByRole("button", { name: "Operator icraçısını sil", exact: true }).click();
+  await expect(page.locator(".toast")).toContainText("Əvvəl bu icraçının addımlarını başqa icraçıya keçir.");
+  await expect(page.getByLabel("Pool 1 icraçı 1", { exact: true })).toHaveValue("Operator");
+  await openStep(page, 1);
+  await page.getByLabel("1-ci addımın icraçısı", { exact: true }).selectOption({ label: "Bank / İcraçı" });
+  await openSection(page, "İştirakçılar");
+  await page.getByRole("button", { name: "Pool sayını azalt", exact: true }).click();
+  await expect(page.getByLabel("Pool sayı", { exact: true })).toHaveValue("2");
+  await expect(page.locator(".toast")).toContainText("pool-dakı addımların icraçısını dəyiş");
+  await openStep(page, 1);
+  await page.getByLabel("1-ci addımın icraçısı", { exact: true }).selectOption({ label: "Təşkilat / Vizaçı" });
+  await openSection(page, "İştirakçılar");
+  await page.getByRole("button", { name: "Operator icraçısını sil", exact: true }).click();
+  await expect(page.getByLabel("Pool 1 icraçı 1", { exact: true })).toHaveValue("Vizaçı");
+  await page.getByRole("button", { name: "Pool sayını azalt", exact: true }).click();
+  await expect(page.getByLabel("Pool sayı", { exact: true })).toHaveValue("1");
+  expect((await savedProject(page)).steps).toHaveLength(1);
 });
 
-test("zooming respects deliberate panning after keyboard selection", async ({ page }) => {
+test("undo restores deleted steps and their incoming connections", async ({ page }) => {
+  await openWorkspace(page);
+  await openSection(page, "Addımlar");
+  await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
+  await page.getByRole("button", { name: "Addım əlavə et", exact: true }).click();
+  await page.getByRole("button", { name: "Son hadisəsi", exact: true }).click();
+  const before = await savedProject(page);
+  await openStep(page, 2);
+  await page.getByRole("button", { name: "2-ci addımı sil", exact: true }).click();
+  await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(2);
+  expect((await savedProject(page)).steps[0].routes).toHaveLength(0);
+  await page.getByRole("button", { name: "Son dəyişikliyi geri al", exact: true }).click();
+  await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(3);
+  expect(await savedProject(page)).toEqual(before);
+});
+
+test("selecting a diagram element opens its form and deliberate zooming preserves the pan position", async ({ page }) => {
   await openWorkspace(page);
   await openSample(page);
   const node = page.locator("#process-diagram").getByRole("button", { name: "Son: İcra olunub", exact: true });
   await node.focus();
   await node.press("Space");
   await expect(node).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("20-ci addımın adı", { exact: true })).toHaveValue("İcra olunub");
   await expect(node).toBeInViewport({ ratio: 1 });
   const viewport = page.locator(".diagram-viewport");
   await viewport.evaluate((element) => { element.scrollLeft = 0; element.scrollTop = 0; });
@@ -304,47 +300,43 @@ test("zooming respects deliberate panning after keyboard selection", async ({ pa
   await expect(node).toHaveAttribute("aria-pressed", "true");
 });
 
-test.describe("mobile layout", () => {
+test("full-screen mode expands the diagram and exits without changing the saved process", async ({ page }) => {
+  await openWorkspace(page);
+  await openSample(page);
+  const before = await savedProject(page);
+  const initialHeight = (await page.locator(".diagram-viewport").boundingBox())!.height;
+  await page.getByRole("button", { name: "Diaqramı tam ekranda aç", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Tam ekrandan çıx", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.classList.contains("diagram-panel") || !!document.querySelector(".diagram-fullscreen"))).toBe(true);
+  expect((await page.locator(".diagram-viewport").boundingBox())!.height).toBeGreaterThan(initialHeight);
+  await page.getByRole("button", { name: "Tam ekrandan çıx", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Diaqramı tam ekranda aç", exact: true })).toBeVisible();
+  expect(await savedProject(page)).toEqual(before);
+});
+
+test.describe("mobile form and canvas", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test("the page stays within its viewport while the diagram scrolls independently", async ({ page }, testInfo) => {
+  test("the sample fits by default and the page never scrolls horizontally", async ({ page }, testInfo) => {
     await openWorkspace(page);
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-    await page.getByRole("button", { name: "Kömək", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Cədvəldən Visio diaqramına", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Aydındır", exact: true }).click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    await page.getByRole("button", { name: "Nümunə aç", exact: true }).click();
-    await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(20);
-    const sample = await savedProject(page);
-    const fileChooser = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "JSON layihəsini aç", exact: true }).click();
-    await (await fileChooser).setFiles({ name: "mobile.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ ...sample, name: "Mobil layihə" })) });
-    await expect(page.getByLabel("Prosesin adı")).toHaveValue("Mobil layihə");
-    expect((await savedProject(page)).id).not.toBe(sample.id);
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await openSample(page);
     const viewport = page.locator(".diagram-viewport");
-    expect(await viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-    await page.getByRole("button", { name: "Bütün diaqramı ekrana sığdır", exact: true }).click();
-    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1)).toBe(true);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath("mobile-workspace.png"), fullPage: true });
+    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+    await openStep(page, 2);
+    await page.getByLabel("2-ci addımın adı", { exact: true }).fill("Mobil formda dəyişiklik");
+    const saved = await savedProject(page);
+    await page.reload();
+    await openSection(page, "İştirakçılar");
+    await expect(page.getByLabel("Prosesin adı")).toHaveValue(saved.name);
+    expect(await savedProject(page)).toEqual(saved);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("mobile-form-workspace.png"), fullPage: true });
   });
 
-  test("fit handles the maximum-size flow and keyboard or pointer panning remains usable", async ({ page }) => {
-    await openWorkspace(page);
-    const large: Project = {
-      version: 1, id: "large-project", name: "Uzun iş axını",
-      pools: [{ id: "large-pool", name: "Təşkilat", lanes: [{ id: "large-lane", name: "Operator" }] }],
-      steps: Array.from({ length: 200 }, (_, index) => ({
-        id: `large-step-${index}`, laneId: "large-lane", type: index === 0 ? "start" : index === 199 ? "end" : "task",
-        title: `Addım ${index + 1}`, description: "", routes: index === 199 ? [] : [{ targetId: `large-step-${index + 1}`, label: "" }],
-      })),
-    };
-    await page.getByLabel("JSON layihə faylı", { exact: true }).setInputFiles({ name: "large.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(large)) });
-    await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(200);
+  test("the maximum-size saved flow fits and supports keyboard and pointer panning", async ({ page }) => {
+    await seedProject(page, longProject());
     const viewport = page.locator(".diagram-viewport");
-    await page.getByRole("button", { name: "Bütün diaqramı ekrana sığdır", exact: true }).click();
     await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1)).toBe(true);
     await page.setViewportSize({ width: 360, height: 740 });
     await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1)).toBe(true);
@@ -363,9 +355,7 @@ test.describe("mobile layout", () => {
     await page.mouse.up();
     await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(beforeDrag + 50);
     await expect(viewport).toHaveCSS("cursor", "grab");
-    await page.getByLabel("JSON layihə faylı", { exact: true }).setInputFiles({ name: "another.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ ...large, name: "Başqa iş axını" })) });
-    await expect(page.getByLabel("Prosesin adı")).toHaveValue("Başqa iş axını");
-    await expect(page.locator(".diagram-toolbar [aria-live='polite']")).toHaveText("80%");
-    await expect.poll(() => viewport.evaluate((element) => element.scrollLeft === 0 && element.scrollTop === 0)).toBe(true);
+    await page.getByRole("button", { name: "Bütün diaqramı ekrana sığdır", exact: true }).click();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollLeft === 0 && element.scrollTop === 0 && element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Maximize2, Minus, Plus, MousePointer2 } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Expand, Minus, Plus, Scan, Shrink } from "lucide-react";
 import { layoutProject } from "@/lib/layout";
 import type { Project, StepType } from "@/lib/types";
 
@@ -16,11 +16,6 @@ const typeLabels: Record<StepType, string> = {
   serviceTask: "Sistem tapşırığı", subprocess: "Alt proses", xor: "XOR keçidi", or: "OR keçidi",
   and: "AND keçidi", intermediate: "Aralıq hadisə", message: "Mesaj hadisəsi",
   timer: "Vaxt hadisəsi", data: "Məlumat", annotation: "Qeyd",
-};
-
-const buttonStyle: CSSProperties = {
-  width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center",
-  border: "1px solid #e3e9ee", borderRadius: 7, background: "#fff", color: "#647180", cursor: "pointer",
 };
 
 const MIN_MANUAL_ZOOM = 0.1;
@@ -43,7 +38,7 @@ function wrapText(value: string, length: number, maxLines = 4) {
   return lines.length ? lines : ["Adsız addım"];
 }
 
-function TextLines({ text, x, y, width = 140, maxLines = 4, size = 12, color = "#344654" }: {
+function TextLines({ text, x, y, width = 140, maxLines = 4, size = 12, color = "#e9ecef" }: {
   text: string; x: number; y: number; width?: number; maxLines?: number; size?: number; color?: string;
 }) {
   const lines = wrapText(text, Math.max(6, Math.floor(width / (size * 0.54))), maxLines);
@@ -72,15 +67,19 @@ function routeLabelPosition(points: { x: number; y: number }[], branch = false) 
 export default function Diagram({ project, selectedId, onSelect }: DiagramProps) {
   const layout = useMemo(() => layoutProject(project), [project]);
   const stepById = useMemo(() => new Map(project.steps.map((step) => [step.id, step])), [project.steps]);
+  const panel = useRef<HTMLDivElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
-  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const pan = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
   const previousProject = useRef(project.id);
-  const fittedProject = useRef<string | null>(null);
+  const fittedProject = useRef<string | null>(project.id);
   const previousSelection = useRef("");
   const pendingScroll = useRef<{ left: number; top: number } | null>(null);
   const [zoom, setZoom] = useState(0.8);
-  const [fitted, setFitted] = useState(false);
+  const [fitted, setFitted] = useState(true);
   const [panning, setPanning] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [fullscreenNotice, setFullscreenNotice] = useState("");
   const markerPrefix = useId().replace(/:/g, "");
   const diagramWidth = Math.max(560, layout.width);
   const diagramHeight = Math.max(360, layout.height);
@@ -91,12 +90,41 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
     previousSelection.current = "";
     pendingScroll.current = null;
     pan.current = null;
-    fittedProject.current = null;
+    fittedProject.current = project.id;
     setPanning(false);
-    setFitted(false);
-    setZoom(0.8);
+    setFitted(true);
     viewport.current?.scrollTo({ left: 0, top: 0 });
   }, [project.id]);
+
+  useEffect(() => {
+    const handleFullscreen = () => setFullscreen(document.fullscreenElement === panel.current);
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setExpanded(false); setFullscreenNotice(""); }
+    };
+    document.addEventListener("fullscreenchange", handleFullscreen);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreen);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!expanded || !panel.current) return;
+    const element = panel.current;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const items = Array.from(element.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]'));
+      const first = items[0], last = items[items.length - 1];
+      if (!element.contains(document.activeElement)) { event.preventDefault(); first?.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener("keydown", handleTab);
+    return () => { document.body.style.overflow = originalOverflow; document.removeEventListener("keydown", handleTab); };
+  }, [expanded]);
 
   useEffect(() => {
     if (!selectedId || !viewport.current) { previousSelection.current = ""; return; }
@@ -149,6 +177,29 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
     setFitted(false);
     setZoom(nextZoom);
   }
+
+  function stopAutomaticFit() {
+    fittedProject.current = null;
+    setFitted(false);
+  }
+
+  async function toggleFullscreen() {
+    const element = panel.current;
+    if (!element) return;
+    setFullscreenNotice("");
+    if (expanded) { setExpanded(false); return; }
+    if (document.fullscreenElement === element) {
+      try { await document.exitFullscreen(); }
+      catch { setFullscreenNotice("Tam ekrandan çıxmaq üçün Esc düyməsini bas."); }
+      return;
+    }
+    if (element.requestFullscreen && document.fullscreenEnabled) {
+      try { await element.requestFullscreen(); return; }
+      catch { /* Embedded browsers can deny fullscreen; the expanded view remains available. */ }
+    }
+    setExpanded(true);
+  }
+
   function fit() {
     const view = viewport.current;
     if (!view) return;
@@ -159,57 +210,69 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
     view.scrollTo({ left: 0, top: 0 });
   }
 
-  return <div className="diagram-panel" style={{ display: "flex", flexDirection: "column", height: 510, minHeight: 440 }}>
-    <div className="diagram-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, padding: "14px 20px", borderBottom: "1px solid #e9eef2", background: "#fff" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#88929d" }}>
-        <span style={{ width: 6, height: 6, background: "#1aae97", borderRadius: "50%" }} />
-        <span>Canlı görünüş</span>
-        <span style={{ color: "#d2d9df" }}>•</span>
-        <span>{project.steps.length} addım</span>
-      </div>
-      <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-        <button type="button" className="diagram-control" style={buttonStyle} aria-label="Diaqramı kiçilt" title="Kiçilt" onClick={() => changeZoom(zoom - 0.1)} disabled={zoom <= MIN_MANUAL_ZOOM}><Minus size={15} /></button>
-        <span aria-live="polite" style={{ minWidth: 43, textAlign: "center", fontSize: 11, fontWeight: 600, color: "#697887" }}>{zoom < 0.1 ? Math.round(zoom * 1000) / 10 : Math.round(zoom * 100)}%</span>
-        <button type="button" className="diagram-control" style={buttonStyle} aria-label="Diaqramı böyüt" title="Böyüt" onClick={() => changeZoom(zoom + 0.1)} disabled={zoom >= MAX_ZOOM}><Plus size={15} /></button>
-        <div style={{ width: 1, height: 20, background: "#e9eef2", margin: "0 5px" }} />
-        <button type="button" className="diagram-control" style={buttonStyle} aria-label="Bütün diaqramı ekrana sığdır" title="Ekrana sığdır" onClick={fit}><Maximize2 size={14} /></button>
+  return <div ref={panel} className={`diagram-panel${expanded ? " diagram-fullscreen" : ""}`}>
+    <div className="diagram-toolbar">
+      <span className="diagram-title">Bütün axın</span>
+      <div className="diagram-controls">
+        <button type="button" className="diagram-control" aria-label="Diaqramı kiçilt" title="Kiçilt" onClick={() => changeZoom(zoom - 0.1)} disabled={zoom <= MIN_MANUAL_ZOOM}><Minus size={15} /></button>
+        <span className="diagram-zoom" aria-live="polite">{zoom < 0.1 ? Math.round(zoom * 1000) / 10 : Math.round(zoom * 100)}%</span>
+        <button type="button" className="diagram-control" aria-label="Diaqramı böyüt" title="Böyüt" onClick={() => changeZoom(zoom + 0.1)} disabled={zoom >= MAX_ZOOM}><Plus size={15} /></button>
+        <span className="diagram-controls-divider" />
+        <button type="button" className="diagram-control" aria-label="Bütün diaqramı ekrana sığdır" title="Ekrana sığdır" onClick={fit}><Scan size={15} /></button>
+        <button type="button" className="diagram-control" aria-label={fullscreen || expanded ? "Tam ekrandan çıx" : "Diaqramı tam ekranda aç"} aria-pressed={fullscreen || expanded} title={fullscreen || expanded ? "Tam ekrandan çıx" : "Tam ekran"} onClick={() => void toggleFullscreen()}>{fullscreen || expanded ? <Shrink size={15} /> : <Expand size={15} />}</button>
       </div>
     </div>
-    <div ref={viewport} className="diagram-viewport" tabIndex={0} role="region" aria-label="Diaqram sahəsi. Sürüşdürün və ya ox düymələri ilə digər addımlara baxın." style={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto", backgroundColor: "#f9fbfc", backgroundImage: "radial-gradient(#dce5ea 0.8px, transparent 0.8px)", backgroundSize: "18px 18px", cursor: panning ? "grabbing" : "grab", touchAction: "pan-x pan-y" }}
+    {fullscreenNotice && <div className="diagram-notice" role="status">{fullscreenNotice}</div>}
+    <div ref={viewport} className={`diagram-viewport${panning ? " is-panning" : ""}`} tabIndex={0} role="region" aria-label="Diaqram sahəsi. Sürüşdürün və ya ox düymələri ilə digər addımlara baxın."
+      onWheel={() => {
+        const view = viewport.current;
+        if (view && (view.scrollWidth > view.clientWidth + 1 || view.scrollHeight > view.clientHeight + 1)) stopAutomaticFit();
+      }}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+        const view = event.currentTarget;
+        if (view.scrollWidth > view.clientWidth + 1 || view.scrollHeight > view.clientHeight + 1) stopAutomaticFit();
+      }}
       onPointerDown={(event) => {
         if (!event.isPrimary || event.button !== 0 || (event.target as Element).closest("[data-step-id]")) return;
         const view = viewport.current;
         if (!view) return;
-        pan.current = { x: event.clientX, y: event.clientY, left: view.scrollLeft, top: view.scrollTop };
+        pan.current = { x: event.clientX, y: event.clientY, left: view.scrollLeft, top: view.scrollTop, moved: false };
         setPanning(true); view.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
         if (!pan.current || !viewport.current) return;
+        const view = viewport.current;
+        if (!pan.current.moved && (Math.abs(pan.current.x - event.clientX) > 2 || Math.abs(pan.current.y - event.clientY) > 2) && (view.scrollWidth > view.clientWidth + 1 || view.scrollHeight > view.clientHeight + 1)) {
+          pan.current.moved = true;
+          stopAutomaticFit();
+        }
         viewport.current.scrollLeft = pan.current.left + pan.current.x - event.clientX;
         viewport.current.scrollTop = pan.current.top + pan.current.y - event.clientY;
       }}
       onPointerUp={(event) => { pan.current = null; setPanning(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
       onLostPointerCapture={() => { pan.current = null; setPanning(false); }}
       onPointerCancel={() => { pan.current = null; setPanning(false); }}>
-      <div style={{ width: diagramWidth * zoom + 48, minWidth: "100%", height: diagramHeight * zoom + 48, minHeight: "100%", padding: 24, boxSizing: "border-box" }}>
-        <svg id="process-diagram" xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${diagramWidth} ${diagramHeight}`} width={diagramWidth * zoom} height={diagramHeight * zoom} role="group" aria-label="İş axınının BPMN diaqramı" style={{ display: "block", fontFamily: "Arial, sans-serif", overflow: "visible" }}>
+      <div className="diagram-surface" style={{ width: diagramWidth * zoom + 48, height: diagramHeight * zoom + 48 }}>
+        <svg className="diagram-svg" id="process-diagram" xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${diagramWidth} ${diagramHeight}`} width={diagramWidth * zoom} height={diagramHeight * zoom} role="group" aria-label="İş axınının BPMN diaqramı" style={{ fontFamily: "Arial, sans-serif" }}>
           <title>İş axınının BPMN diaqramı</title>
+          <rect x="0" y="0" width={diagramWidth} height={diagramHeight} fill="#111315" />
           <defs>
-            <marker id={`${markerPrefix}-arrow`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="#81939d" /></marker>
-            <marker id={`${markerPrefix}-message`} markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M 1 1 L 8 4.5 L 1 8" fill="none" stroke="#9a87bf" strokeWidth="1.2" /></marker>
+            <marker id={`${markerPrefix}-arrow`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="#a1ada6" /></marker>
+            <marker id={`${markerPrefix}-message`} markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M 1 1 L 8 4.5 L 1 8" fill="none" stroke="#b8a8d8" strokeWidth="1.2" /></marker>
           </defs>
           {layout.pools.map((pool, index) => <g key={pool.id}>
-            <rect x={pool.x} y={pool.y} width={pool.width} height={pool.height} rx="8" fill={index % 2 ? "#fffdfb" : "#ffffff"} stroke="#dbe4e9" strokeWidth="1.3" />
-            <path d={`M ${pool.x + 8} ${pool.y} H ${pool.x + pool.width - 8} Q ${pool.x + pool.width} ${pool.y} ${pool.x + pool.width} ${pool.y + 8} V ${pool.y + 36} H ${pool.x} V ${pool.y + 8} Q ${pool.x} ${pool.y} ${pool.x + 8} ${pool.y} Z`} fill="#f0f3fa" />
-            <text x={pool.x + 16} y={pool.y + 23} fill="#586178" fontSize="12" fontWeight="600"><title>{pool.name || "Adsız pool"}</title>{wrapText(pool.name || "Adsız pool", Math.max(8, Math.floor((pool.width - 124) / 6.5)), 1)[0]}</text>
-            <text x={pool.x + pool.width - 16} y={pool.y + 23} textAnchor="end" fill="#929aac" fontSize="10">POOL {index + 1}</text>
+            <rect x={pool.x} y={pool.y} width={pool.width} height={pool.height} rx="8" fill={index % 2 ? "#14181b" : "#131619"} stroke="#34383b" strokeWidth="1.3" />
+            <path d={`M ${pool.x + 8} ${pool.y} H ${pool.x + pool.width - 8} Q ${pool.x + pool.width} ${pool.y} ${pool.x + pool.width} ${pool.y + 8} V ${pool.y + 36} H ${pool.x} V ${pool.y + 8} Q ${pool.x} ${pool.y} ${pool.x + 8} ${pool.y} Z`} fill="#1d2421" />
+            <text x={pool.x + 16} y={pool.y + 23} fill="#d0d5d0" fontSize="12" fontWeight="600"><title>{pool.name || "Adsız pool"}</title>{wrapText(pool.name || "Adsız pool", Math.max(8, Math.floor((pool.width - 124) / 6.5)), 1)[0]}</text>
+            <text x={pool.x + pool.width - 16} y={pool.y + 23} textAnchor="end" fill="#8c968f" fontSize="10">POOL {index + 1}</text>
           </g>)}
           {layout.lanes.map((lane, index) => <g key={lane.id}>
             <title>{lane.name || "Adsız iştirakçı"}</title>
-            <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} fill={index % 2 ? "#fcfdfe" : "#ffffff"} stroke="#e3e9ed" strokeWidth="1" />
-            <rect x={lane.x} y={lane.y} width={136} height={lane.height} fill={index % 2 ? "#f5f8fa" : "#f8fafb"} />
-            <line x1={lane.x + 136} y1={lane.y} x2={lane.x + 136} y2={lane.y + lane.height} stroke="#e3e9ed" />
-            <TextLines text={lane.name || "Adsız iştirakçı"} x={lane.x + 68} y={lane.y + lane.height / 2 + 4} width={113} maxLines={5} size={12} color="#667480" />
+            <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} fill={index % 2 ? "#161b1e" : "#14181b"} stroke="#343d38" strokeWidth="1" />
+            <rect x={lane.x} y={lane.y} width={136} height={lane.height} fill={index % 2 ? "#1c2323" : "#1b2122"} />
+            <line x1={lane.x + 136} y1={lane.y} x2={lane.x + 136} y2={lane.y + lane.height} stroke="#343d38" />
+            <TextLines text={lane.name || "Adsız iştirakçı"} x={lane.x + 68} y={lane.y + lane.height / 2 + 4} width={113} maxLines={5} size={12} color="#c5cec6" />
           </g>)}
           {layout.edges.map((edge, index) => {
             if (edge.points.length < 2) return null;
@@ -222,11 +285,11 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
             const labelWidth = Math.min(maxLabelWidth, Math.max(36, ...labelLines.map((line) => line.length * 5.6 + 14)));
             return <g key={`${edge.sourceId}-${edge.targetId}-${index}`}>
               <title>{edge.label || "Keçid"}</title>
-              <path d={path} fill="none" stroke={edge.message && !association ? "#9a87bf" : "#81939d"} strokeWidth="1.65" strokeDasharray={association ? "2 4" : edge.message ? "6 5" : undefined} strokeLinejoin="round" strokeLinecap="round" markerEnd={association ? undefined : `url(#${markerPrefix}-${edge.message ? "message" : "arrow"})`} />
-              {edge.message && !association && <circle cx={edge.points[0].x} cy={edge.points[0].y} r="3" fill="white" stroke="#9a87bf" strokeWidth="1.3" />}
+              <path d={path} fill="none" stroke={edge.message && !association ? "#b8a8d8" : "#a1ada6"} strokeWidth="1.65" strokeDasharray={association ? "2 4" : edge.message ? "6 5" : undefined} strokeLinejoin="round" strokeLinecap="round" markerEnd={association ? undefined : `url(#${markerPrefix}-${edge.message ? "message" : "arrow"})`} />
+              {edge.message && !association && <circle cx={edge.points[0].x} cy={edge.points[0].y} r="3" fill="#14181b" stroke="#b8a8d8" strokeWidth="1.3" />}
               {edge.label && <g>
-                <rect x={label.x - labelWidth / 2} y={label.y - 10 - (labelLines.length > 1 ? 6 : 0)} width={labelWidth} height={labelLines.length > 1 ? 29 : 19} rx="4" fill="#ffffff" fillOpacity="0.97" />
-                <TextLines text={edge.label} x={label.x} y={label.y + 3} width={labelWidth - 10} maxLines={2} size={10} color="#778690" />
+                <rect x={label.x - labelWidth / 2} y={label.y - 10 - (labelLines.length > 1 ? 6 : 0)} width={labelWidth} height={labelLines.length > 1 ? 29 : 19} rx="4" fill="#1b2022" fillOpacity="0.97" />
+                <TextLines text={edge.label} x={label.x} y={label.y + 3} width={labelWidth - 10} maxLines={2} size={10} color="#c3cbc5" />
               </g>}
             </g>;
           })}
@@ -239,54 +302,52 @@ export default function Diagram({ project, selectedId, onSelect }: DiagramProps)
             const gateway = ["xor", "or", "and"].includes(step.type);
             const event = ["start", "end", "intermediate", "message", "timer"].includes(step.type);
             const r = Math.min(width, height) / 2;
-            const stroke = gateway ? "#c0a45f" : event ? step.type === "start" ? "#42ae95" : step.type === "end" ? "#d88781" : "#8c9ac0" : "#99b9c5";
-            const fill = gateway ? "#fffaf0" : step.type === "start" ? "#eaf8f2" : step.type === "end" ? "#fff0ec" : event ? "#f1f2fc" : step.type === "annotation" ? "#faf8ff" : "#f3fafb";
-            return <g key={node.id} data-step-id={node.id} role="button" tabIndex={0} aria-label={`${typeLabels[step.type]}: ${step.title || "Adsız addım"}`} aria-pressed={selected} onClick={() => onSelect(node.id)} onKeyDown={(key) => { if (key.key === "Enter" || key.key === " ") { key.preventDefault(); onSelect(node.id); } }} style={{ cursor: "pointer", outlineOffset: 4 }}>
+            const stroke = gateway ? "#d1d69c" : event ? step.type === "start" ? "#d8f78c" : step.type === "end" ? "#e1a6a0" : "#b9c2d2" : "#7d978d";
+            const fill = gateway ? "#2b3020" : step.type === "start" ? "#24351d" : step.type === "end" ? "#352222" : event ? "#232a35" : step.type === "annotation" ? "#212225" : "#202b27";
+            return <g key={node.id} className="diagram-node" data-step-id={node.id} role="button" tabIndex={0} aria-label={`${typeLabels[step.type]}: ${step.title || "Adsız addım"}`} aria-pressed={selected} onClick={() => onSelect(node.id)} onKeyDown={(key) => { if (key.key === "Enter" || key.key === " ") { key.preventDefault(); onSelect(node.id); } }}>
               <title>{`${typeLabels[step.type]}: ${step.title || "Adsız addım"}`}</title>
-              {selected && <rect data-editor-only="selection" x={x - 6} y={y - 6} width={width + 12} height={height + 12} rx={event ? r + 6 : 12} fill="none" stroke="#1aad96" strokeOpacity="0.8" strokeWidth="2.5" />}
+              {selected && <rect data-editor-only="selection" x={x - 6} y={y - 6} width={width + 12} height={height + 12} rx={event ? r + 6 : 12} fill="none" stroke="#d8f78c" strokeOpacity="0.9" strokeWidth="2.5" />}
               {gateway ? <>
                 <path d={`M ${cx} ${y} L ${x + width} ${cy} L ${cx} ${y + height} L ${x} ${cy} Z`} fill={fill} stroke={stroke} strokeWidth="1.8" />
-                {step.type === "or" ? <circle cx={cx} cy={cy} r="11" fill="none" stroke="#ae934e" strokeWidth="2.2" /> : <text x={cx} y={cy + 7} textAnchor="middle" fill="#ae934e" fontSize={step.type === "and" ? 29 : 24} fontWeight="500">{step.type === "and" ? "+" : "×"}</text>}
+                {step.type === "or" ? <circle cx={cx} cy={cy} r="11" fill="none" stroke="#d8f78c" strokeWidth="2.2" /> : <text x={cx} y={cy + 7} textAnchor="middle" fill="#d8f78c" fontSize={step.type === "and" ? 29 : 24} fontWeight="500">{step.type === "and" ? "+" : "×"}</text>}
                 <TextLines text={step.title} x={cx} y={y + height + 23} width={130} maxLines={2} size={11} />
               </> : event ? <>
                 <circle cx={cx} cy={cy} r={r - 1} fill={fill} stroke={stroke} strokeWidth={step.type === "end" ? 3 : 1.8} />
                 {["end", "intermediate", "message", "timer"].includes(step.type) && <circle cx={cx} cy={cy} r={r - 6} fill="none" stroke={stroke} strokeWidth="1" />}
-                {step.type === "message" && <g stroke="#8491b5" strokeWidth="1.4" fill="none"><rect x={cx - 11} y={cy - 7} width="22" height="14" rx="1" /><path d={`M ${cx - 11} ${cy - 7} L ${cx} ${cy + 1} L ${cx + 11} ${cy - 7}`} /></g>}
-                {step.type === "timer" && <g stroke="#8491b5" strokeWidth="1.4" fill="none"><circle cx={cx} cy={cy} r="12" /><path d={`M ${cx} ${cy - 8} V ${cy} L ${cx + 6} ${cy + 4}`} />{[0, 1, 2, 3].map((tick) => <line key={tick} x1={cx} y1={cy - 12} x2={cx} y2={cy - 9} transform={`rotate(${tick * 90} ${cx} ${cy})`} />)}</g>}
-                {step.type === "start" && <circle cx={cx} cy={cy} r="4" fill="#42ae95" />}
-                {step.type === "end" && <rect x={cx - 4} y={cy - 4} width="8" height="8" rx="1" fill="#d88781" />}
+                {step.type === "message" && <g stroke="#b9c2d2" strokeWidth="1.4" fill="none"><rect x={cx - 11} y={cy - 7} width="22" height="14" rx="1" /><path d={`M ${cx - 11} ${cy - 7} L ${cx} ${cy + 1} L ${cx + 11} ${cy - 7}`} /></g>}
+                {step.type === "timer" && <g stroke="#b9c2d2" strokeWidth="1.4" fill="none"><circle cx={cx} cy={cy} r="12" /><path d={`M ${cx} ${cy - 8} V ${cy} L ${cx + 6} ${cy + 4}`} />{[0, 1, 2, 3].map((tick) => <line key={tick} x1={cx} y1={cy - 12} x2={cx} y2={cy - 9} transform={`rotate(${tick * 90} ${cx} ${cy})`} />)}</g>}
+                {step.type === "start" && <circle cx={cx} cy={cy} r="4" fill="#d8f78c" />}
+                {step.type === "end" && <rect x={cx - 4} y={cy - 4} width="8" height="8" rx="1" fill="#e1a6a0" />}
                 <TextLines text={step.title} x={cx} y={y + height + 22} width={120} maxLines={2} size={11} />
               </> : step.type === "data" ? <>
-                <path d={`M ${x} ${y} H ${x + width - 17} L ${x + width} ${y + 17} V ${y + height} H ${x} Z M ${x + width - 17} ${y} V ${y + 17} H ${x + width}`} fill="#f4f3fd" stroke="#a9a1c8" strokeWidth="1.7" />
+                <path d={`M ${x} ${y} H ${x + width - 17} L ${x + width} ${y + 17} V ${y + height} H ${x} Z M ${x + width - 17} ${y} V ${y + 17} H ${x + width}`} fill="#282532" stroke="#b5a6c8" strokeWidth="1.7" />
                 <TextLines text={step.title} x={cx} y={cy + 4} width={width - 24} maxLines={4} />
               </> : step.type === "annotation" ? <>
                 <rect x={x} y={y} width={width} height={height} fill={fill} />
-                <path d={`M ${x + 12} ${y} H ${x} V ${y + height} H ${x + 12}`} stroke="#aea4c6" strokeWidth="2" fill="none" />
-                <TextLines text={step.title} x={cx + 3} y={cy + 4} width={width - 24} maxLines={4} size={11} color="#82758f" />
+                <path d={`M ${x + 12} ${y} H ${x} V ${y + height} H ${x + 12}`} stroke="#9fa0a5" strokeWidth="2" fill="none" />
+                <TextLines text={step.title} x={cx + 3} y={cy + 4} width={width - 24} maxLines={4} size={11} color="#b8b8bb" />
               </> : <>
                 <rect x={x} y={y} width={width} height={height} rx="9" fill={fill} stroke={stroke} strokeWidth="1.6" />
-                {step.type === "userTask" && <g transform={`translate(${x + 13} ${y + 11})`} stroke="#7d9eaa" strokeWidth="1.4" fill="none"><circle cx="4" cy="3" r="2.5" /><path d="M 0 11 V 9 Q 0 6 4 6 Q 8 6 8 9 V 11" /></g>}
-                {step.type === "serviceTask" && <g transform={`translate(${x + 17} ${y + 16})`} stroke="#7d9eaa" strokeWidth="1.4" fill="none"><circle r="5" /><circle r="1.8" />{[0, 1, 2, 3].map((tick) => <line key={tick} x1="0" y1="-8" x2="0" y2="-5" transform={`rotate(${tick * 90})`} />)}</g>}
+                {step.type === "userTask" && <g transform={`translate(${x + 13} ${y + 11})`} stroke="#b2c5ba" strokeWidth="1.4" fill="none"><circle cx="4" cy="3" r="2.5" /><path d="M 0 11 V 9 Q 0 6 4 6 Q 8 6 8 9 V 11" /></g>}
+                {step.type === "serviceTask" && <g transform={`translate(${x + 17} ${y + 16})`} stroke="#b2c5ba" strokeWidth="1.4" fill="none"><circle r="5" /><circle r="1.8" />{[0, 1, 2, 3].map((tick) => <line key={tick} x1="0" y1="-8" x2="0" y2="-5" transform={`rotate(${tick * 90})`} />)}</g>}
                 <TextLines text={step.title} x={cx} y={cy + (step.type === "subprocess" ? -1 : 4)} width={width - 26} maxLines={step.type === "subprocess" ? 3 : 4} />
-                {step.type === "subprocess" && <g><rect x={cx - 6} y={y + height - 17} width="12" height="12" rx="1" fill="#fff" stroke="#80a4b2" /><path d={`M ${cx - 3} ${y + height - 11} H ${cx + 3} M ${cx} ${y + height - 14} V ${y + height - 8}`} fill="none" stroke="#80a4b2" strokeWidth="1.2" /></g>}
+                {step.type === "subprocess" && <g><rect x={cx - 6} y={y + height - 17} width="12" height="12" rx="1" fill="#202b27" stroke="#b2c5ba" /><path d={`M ${cx - 3} ${y + height - 11} H ${cx + 3} M ${cx} ${y + height - 14} V ${y + height - 8}`} fill="none" stroke="#b2c5ba" strokeWidth="1.2" /></g>}
               </>}
             </g>;
           })}
           {!layout.nodes.length && <g>
-            <text x={diagramWidth / 2} y={diagramHeight / 2 - 8} textAnchor="middle" fill="#73818d" fontSize="16" fontWeight="500">İlk addımınızı əlavə edin</text>
-            <text x={diagramWidth / 2} y={diagramHeight / 2 + 20} textAnchor="middle" fill="#a0aab3" fontSize="12">Cədvəli doldurduqca diaqram burada yaranacaq.</text>
+            <text x={diagramWidth / 2} y={diagramHeight / 2 - 8} textAnchor="middle" fill="#d7dfd8" fontSize="16" fontWeight="500">İlk addımını əlavə et</text>
+            <text x={diagramWidth / 2} y={diagramHeight / 2 + 20} textAnchor="middle" fill="#929c95" fontSize="12">Formanı doldurduqca diaqram burada yaranacaq.</text>
           </g>}
         </svg>
       </div>
     </div>
-    <div className="diagram-legend" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, padding: "12px 20px", background: "#fff", borderTop: "1px solid #e9eef2", fontSize: 10, color: "#8a96a1" }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, border: "1.5px solid #42ae95", background: "#eaf8f2", borderRadius: "50%" }} />Başlanğıc</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 11, height: 8, border: "1px solid #99b9c5", background: "#f3fafb", borderRadius: 2 }} />Tapşırıq</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, border: "1px solid #c0a45f", background: "#fffaf0", transform: "rotate(45deg)" }} />Keçid</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 16, borderTop: "1px dashed #9a87bf" }} />Pool-lararası mesaj</span>
-      </div>
-      <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MousePointer2 size={10} />Addımı seçmək üçün üzərinə klikləyin</span>
+    <div className="diagram-legend" aria-label="Diaqram işarələri">
+      <span className="diagram-key event"><i />Başlanğıc</span>
+      <span className="diagram-key task"><i />Tapşırıq</span>
+      <span className="diagram-key gateway"><i />Keçid</span>
+      <span className="diagram-key message"><i />Mesaj</span>
+      {(fullscreen || expanded) && <span className="diagram-fullscreen-hint">Esc ilə çıx</span>}
     </div>
   </div>;
 }
