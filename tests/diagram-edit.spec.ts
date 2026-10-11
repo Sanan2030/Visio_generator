@@ -37,12 +37,12 @@ async function seedProject(page: Page, project = branchingProject()) {
   }, { prefix: STORAGE_PREFIX, saved: project });
   await page.goto(`/#${project.id}`);
   await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(project.steps.length);
-  await expect(page.locator(".save-status")).toHaveText("Saxlanıldı");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
   return project;
 }
 
 async function savedProject(page: Page): Promise<Project> {
-  await expect(page.locator(".save-status")).toHaveText("Saxlanıldı");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
   return page.evaluate(prefix => JSON.parse(localStorage.getItem(prefix + location.hash.slice(1))!), STORAGE_PREFIX);
 }
 
@@ -253,4 +253,65 @@ test("automatic layout removes manual positions and undo restores them", async (
   await expect(page.getByRole("button", { name: "Diaqramı avtomatik düz", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Son dəyişikliyi geri al", exact: true }).click();
   expect(await savedProject(page)).toEqual(original);
+});
+
+test("the floating palette adds editable task, decision and note figures that survive reload", async ({ page }) => {
+  const original = await seedProject(page);
+  for (const [name, type] of [
+    ["Diaqramda tapşırıq əlavə et", "task"],
+    ["Diaqramda qərar əlavə et", "xor"],
+    ["Diaqramda qeyd əlavə et", "annotation"],
+  ] as const) {
+    await page.getByRole("button", { name, exact: true }).click();
+    const added = (await savedProject(page)).steps.at(-1)!;
+    expect(added.type).toBe(type);
+    await expect(node(page, added.id)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Diaqram addımının növü", { exact: true })).toHaveValue(type);
+  }
+  await page.getByLabel("Diaqram addımının adı", { exact: true }).fill("Əlavə qayda");
+  await page.getByLabel("Diaqram addımının təsviri", { exact: true }).fill("Operator əlavə sənəd tələb edə bilər.");
+  const saved = await savedProject(page);
+  expect(saved.steps).toHaveLength(original.steps.length + 3);
+  expect(saved.steps.at(-1)).toMatchObject({
+    type: "annotation", title: "Əlavə qayda", description: "Operator əlavə sənəd tələb edə bilər.",
+  });
+  await page.reload();
+  expect(await savedProject(page)).toEqual(saved);
+  await expect(node(page, saved.steps.at(-1)!.id)).toBeVisible();
+});
+
+test("the pan tool moves the canvas over a selected figure without editing it and selection restores dragging", async ({ page }) => {
+  const original = await seedProject(page);
+  await node(page).click();
+  await expect(node(page)).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Diaqramı böyüt", exact: true }).click();
+  await page.getByRole("button", { name: "Sahəni sürüşdür", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sahəni sürüşdür", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const viewport = page.locator(".diagram-viewport");
+  const scrollBefore = await viewport.evaluate(element => element.scrollLeft);
+  const center = await nodeCenter(page);
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x - 45, center.y, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => viewport.evaluate(element => element.scrollLeft)).toBeGreaterThan(scrollBefore + 30);
+  expect(await savedProject(page)).toEqual(original);
+  await expect(node(page)).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Seç", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Seç", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await dragNode(page, SOURCE_ID, 24, 8);
+  expect((await savedProject(page)).steps.find(step => step.id === SOURCE_ID)!.position).toBeTruthy();
+});
+
+test("the connection tool links a selected source to the clicked target and returns to selection", async ({ page }) => {
+  const original = await seedProject(page);
+  await node(page, "start-request").click();
+  await page.getByRole("button", { name: "Keçid çək", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Keçid çək", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await node(page, "reject-request").click();
+  expect((await savedProject(page)).steps[0].routes).toEqual([
+    ...original.steps[0].routes, { targetId: "reject-request", label: "", description: "" },
+  ]);
+  await expect(page.getByLabel("Keçidin hədəfi", { exact: true })).toHaveValue("reject-request");
+  await expect(page.getByRole("button", { name: "Seç", exact: true })).toHaveAttribute("aria-pressed", "true");
 });

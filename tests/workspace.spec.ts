@@ -7,6 +7,12 @@ import type { Project } from "../lib/types";
 
 const STORAGE_PREFIX = "visioflow:v1:";
 
+async function projectAction(page: Page, name: "Yeni diaqram" | "Nümunə proses") {
+  const action = page.getByRole("button", { name, exact: true });
+  if (!await action.isVisible()) await page.getByRole("button", { name: "Layihə menyusu", exact: true }).click();
+  await action.click();
+}
+
 async function openWorkspace(page: Page) {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Visio üçün yüklə", exact: true })).toBeEnabled();
@@ -14,7 +20,7 @@ async function openWorkspace(page: Page) {
 }
 
 async function savedProject(page: Page): Promise<Project> {
-  await expect(page.locator(".save-status")).toHaveText("Saxlanıldı");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
   return page.evaluate((prefix) => JSON.parse(localStorage.getItem(prefix + window.location.hash.slice(1))!), STORAGE_PREFIX);
 }
 
@@ -29,8 +35,13 @@ async function openStep(page: Page, index: number) {
   await expect(page.getByLabel(`${index}-ci addımın adı`, { exact: true })).toBeVisible();
 }
 
+async function openRoute(page: Page, index: number) {
+  await page.getByRole("button", { name: `Keçid ${index} izahını aç`, exact: true }).click();
+  await expect(page.getByLabel("Keçidin hədəfi", { exact: true })).toBeVisible();
+}
+
 async function openSample(page: Page) {
-  await page.getByRole("button", { name: "Nümunə proses", exact: true }).click();
+  await projectAction(page, "Nümunə proses");
   const confirmation = page.getByRole("dialog");
   if (await confirmation.isVisible()) await confirmation.getByRole("button", { name: "Nümunəni aç", exact: true }).click();
   await openSection(page, "İştirakçılar");
@@ -70,22 +81,30 @@ function longProject(count = 200): Project {
   };
 }
 
-test("the dark workspace presents a form beside a large canvas without JSON controls", async ({ page }, testInfo) => {
+test("the light workspace presents a white form beside a full-height paper canvas without JSON controls", async ({ page }, testInfo) => {
   await openWorkspace(page);
   await expect(page.getByRole("navigation", { name: "Proses forması" }).getByRole("button")).toHaveCount(3);
   await expect(page.locator("input[type='file']")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /JSON/i })).toHaveCount(0);
   await expect(page.locator(".form-panel table")).toHaveCount(0);
-  const form = await page.getByRole("navigation", { name: "Proses forması" }).boundingBox();
+  const form = await page.locator(".form-panel").boundingBox();
   const canvas = await page.locator(".diagram-viewport").boundingBox();
   expect(canvas!.x).toBeGreaterThan(form!.x + form!.width - 1);
   expect(canvas!.width).toBeGreaterThan(form!.width);
+  expect(form!.width).toBeCloseTo(400, 0);
   expect(canvas!.height).toBeGreaterThan(650);
-  expect(await page.evaluate(() => {
-    const colors = getComputedStyle(document.body).backgroundColor.match(/\d+/g)!.slice(0, 3).map(Number);
-    return colors.every((value) => value < 60);
-  })).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("dark-form-workspace.png"), fullPage: true });
+  await expect(page.locator(".form-panel")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(page.locator(".diagram-viewport")).toHaveCSS("background-color", "rgb(238, 241, 244)");
+  await expect(page.getByRole("button", { name: "Word izahını yüklə", exact: true })).toBeVisible();
+  const preview = (await page.locator(".preview-panel").boundingBox())!;
+  expect(preview.y + preview.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 1);
+  const projectMenu = page.getByRole("button", { name: "Layihə menyusu", exact: true });
+  await projectMenu.click();
+  await expect(page.getByRole("button", { name: "Yeni diaqram", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(projectMenu).toHaveAttribute("aria-expanded", "false");
+  await expect(projectMenu).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("light-form-workspace.png"), fullPage: true });
 });
 
 test("form editing builds a connected live flow and restores every field after reload", async ({ page }) => {
@@ -104,7 +123,7 @@ test("form editing builds a connected live flow and restores every field after r
   await expect(page.getByLabel("Pool sayı", { exact: true })).toHaveValue("2");
   await expect(page.locator("#process-diagram")).toContainText("Vizaçı");
   await openSection(page, "Addımlar");
-  await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
+  await page.locator(".empty-steps").getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
   await page.getByRole("button", { name: "Addım əlavə et", exact: true }).click();
   await page.getByLabel("2-ci addımın adı", { exact: true }).fill("Sənədi təsdiqlə");
   await page.getByLabel("2-ci addımın növü", { exact: true }).selectOption("userTask");
@@ -123,10 +142,11 @@ test("form editing builds a connected live flow and restores every field after r
   await taskNode.focus();
   await taskNode.press("Enter");
   await expect(page.getByLabel("2-ci addımın adı", { exact: true })).toHaveValue("Sənədi təsdiqlə");
-  await expect(page.getByLabel("Keçid 1 hədəfi", { exact: true }).locator("option:checked")).toHaveText("3. Cavabı göndər");
   await page.getByLabel("2-ci addımın adı", { exact: true }).fill("Sənədi yoxla");
   await expect(page.locator("#process-diagram").getByRole("button", { name: "İstifadəçi tapşırığı: Sənədi yoxla", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await page.getByLabel("Keçid 1 şərti", { exact: true }).fill("Təsdiq");
+  await openRoute(page, 1);
+  await expect(page.getByLabel("Keçidin hədəfi", { exact: true }).locator("option:checked")).toHaveText("3. Cavabı göndər");
+  await page.getByLabel("Etiketin mətni", { exact: true }).fill("Təsdiq");
   await expect(page.locator("#process-diagram")).toContainText("Təsdiq");
   const before = await savedProject(page);
   expect(before.steps[0].routes[0].targetId).toBe(before.steps[1].id);
@@ -196,8 +216,9 @@ test("the example downloads editable native Visio shapes and the process explana
   expect(pageXml).toContain("Əsas məlumatları doldur");
   expect(pageXml).toContain("<Connects>");
   expect(pageXml.match(/<Row N="ProjectStepId">/g)).toHaveLength(20);
+  await openSection(page, "İştirakçılar");
   const wordDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Word cədvəli yüklə", exact: true }).click();
+  await page.getByRole("button", { name: "Word izahını yüklə", exact: true }).click();
   const word = await wordDownload;
   expect(word.suggestedFilename()).toMatch(/\.docx$/);
   const docx = await JSZip.loadAsync(await downloadBytes(word), { checkCRC32: true });
@@ -212,13 +233,14 @@ test("the example downloads editable native Visio shapes and the process explana
   for (const row of expectedRows) expect(documentXml).toContain(row.number);
   expect(documentXml).toContain("İmtina");
   expect(documentXml).toContain("Operator");
+  await openSection(page, "İzah");
   await expect(page.locator(".explanation-text tbody tr")).toHaveCount(expectedRows.length);
 });
 
 test("invalid flows open the review section and block Visio export", async ({ page }) => {
   await openWorkspace(page);
   await openSection(page, "Addımlar");
-  await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
+  await page.locator(".empty-steps").getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
   const downloads: Download[] = [];
   page.on("download", (file) => downloads.push(file));
   await page.getByRole("button", { name: "Visio üçün yüklə", exact: true }).click();
@@ -232,7 +254,8 @@ test("unfinished routes survive autosave and become valid after choosing their t
   await openWorkspace(page);
   await openSample(page);
   await openStep(page, 1);
-  await page.getByLabel("Keçid 1 hədəfi", { exact: true }).selectOption("");
+  await openRoute(page, 1);
+  await page.getByLabel("Keçidin hədəfi", { exact: true }).selectOption("");
   const draft = await savedProject(page);
   expect(draft.steps[0].routes[0].targetId).toBe("");
   const draftUrl = page.url();
@@ -243,12 +266,14 @@ test("unfinished routes survive autosave and become valid after choosing their t
   expect(page.url()).toBe(draftUrl);
   expect(await savedProject(page)).toEqual(draft);
   await openStep(page, 1);
-  await expect(page.getByLabel("Keçid 1 hədəfi", { exact: true })).toHaveValue("");
+  await openRoute(page, 1);
+  await expect(page.getByLabel("Keçidin hədəfi", { exact: true })).toHaveValue("");
   await openSection(page, "İzah");
   await expect(page.locator(".validation-card.has-errors")).toBeVisible();
   await expect(page.locator(".issue-list .error")).toContainText("keçidin hədəfi mövcud deyil.");
   await openStep(page, 1);
-  await page.getByLabel("Keçid 1 hədəfi", { exact: true }).selectOption({ label: "2. Əsas məlumatları doldur" });
+  await openRoute(page, 1);
+  await page.getByLabel("Keçidin hədəfi", { exact: true }).selectOption({ label: "2. Əsas məlumatları doldur" });
   await openSection(page, "İzah");
   await expect(page.getByText("Struktur yoxlaması tamamlandı", { exact: true })).toBeVisible();
 });
@@ -261,7 +286,7 @@ test("lanes and pools containing steps are protected until the steps move", asyn
   await page.getByRole("button", { name: "Pool sayını artır", exact: true }).click();
   await page.getByLabel("Pool 2 adı", { exact: true }).fill("Bank");
   await openSection(page, "Addımlar");
-  await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
+  await page.locator(".empty-steps").getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
   await openSection(page, "İştirakçılar");
   await page.getByRole("button", { name: "Operator icraçısını sil", exact: true }).click();
   await expect(page.locator(".toast")).toContainText("Əvvəl bu icraçının addımlarını başqa icraçıya keçir.");
@@ -285,7 +310,7 @@ test("lanes and pools containing steps are protected until the steps move", asyn
 test("undo restores deleted steps and their incoming connections", async ({ page }) => {
   await openWorkspace(page);
   await openSection(page, "Addımlar");
-  await page.getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
+  await page.locator(".empty-steps").getByRole("button", { name: "Başlanğıc əlavə et", exact: true }).click();
   await page.getByRole("button", { name: "Addım əlavə et", exact: true }).click();
   await page.getByRole("button", { name: "Son hadisəsi", exact: true }).click();
   const before = await savedProject(page);
@@ -330,6 +355,29 @@ test("full-screen mode expands the diagram and exits without changing the saved 
 
 test.describe("mobile form and canvas", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test("a compact route opens its focused editor in view and closing returns to the route", async ({ page }) => {
+    await openWorkspace(page);
+    await openSample(page);
+    await openStep(page, 1);
+    const opener = page.getByRole("button", { name: "Keçid 1 izahını aç", exact: true });
+    await opener.click();
+    const label = page.getByLabel("Etiketin mətni", { exact: true });
+    await expect(label).toBeFocused();
+    await expect(label).toBeInViewport({ ratio: 1 });
+    await label.fill("Mobil keçid");
+    await page.getByLabel("Keçidin izahı", { exact: true }).fill("Müraciət əsas məlumatların doldurulmasına keçir.");
+    const saved = await savedProject(page);
+    expect(saved.steps[0].routes[0]).toMatchObject({
+      label: "Mobil keçid", description: "Müraciət əsas məlumatların doldurulmasına keçir.",
+    });
+    await page.getByRole("button", { name: "Redaktə panelini bağla", exact: true }).click();
+    await expect(page.getByRole("complementary", { name: "Keçid redaktəsi", exact: true })).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(opener).toBeInViewport({ ratio: 1 });
+    await page.reload();
+    expect(await savedProject(page)).toEqual(saved);
+  });
 
   test("the sample fits by default and the page never scrolls horizontally", async ({ page }, testInfo) => {
     await openWorkspace(page);

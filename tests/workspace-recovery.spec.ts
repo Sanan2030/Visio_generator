@@ -1,9 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 import { SAMPLE_PROJECT } from "../lib/process";
 
+async function projectAction(page: Page, name: "Yeni diaqram" | "Nümunə proses") {
+  const action = page.getByRole("button", { name, exact: true });
+  if (!await action.isVisible()) await page.getByRole("button", { name: "Layihə menyusu", exact: true }).click();
+  await action.click();
+}
+
 async function openWorkspace(page: Page, path = "/") {
   await page.goto(path);
-  await expect(page.locator(".save-status")).toHaveText(/^(Saxlanıldı|Yaddaş əlçatan deyil)$/);
+  await expect(page.locator(".save-status")).toHaveText(/^(Saxlanılıb|Yaddaş əlçatan deyil)$/);
   await page.locator(".form-tabs").getByRole("button", { name: /İştirakçılar/ }).click();
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toBeVisible();
 }
@@ -44,7 +50,7 @@ test("an edit persists before an immediate same-event reload", async ({ page }) 
   ]);
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Son anda yazılmış iş");
   expect(new URL(page.url()).hash).toBe(originalHash);
-  await expect(page.locator(".save-status")).toHaveText("Saxlanıldı");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
 });
 
 test("old version-one drafts restore at their existing hash without an import flow", async ({ page }) => {
@@ -63,7 +69,7 @@ test("hash navigation restores earlier drafts and clearing it creates a separate
   await openWorkspace(page);
   await page.getByLabel("Prosesin adı", { exact: true }).fill("Birinci layihə");
   const firstHash = new URL(page.url()).hash;
-  await page.getByRole("button", { name: "Yeni diaqram", exact: true }).click();
+  await projectAction(page, "Yeni diaqram");
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Yeni iş axını");
   const secondHash = new URL(page.url()).hash;
   expect(secondHash).not.toBe(firstHash);
@@ -143,7 +149,7 @@ test("unsaved work survives blocked-storage project switches until explicit disc
   await expect(page.locator(".save-status")).toHaveText("Yaddaş əlçatan deyil");
   expect(await unloadIsBlocked(page)).toBe(true);
   const originalUrl = page.url();
-  await page.getByRole("button", { name: "Yeni diaqram", exact: true }).click();
+  await projectAction(page, "Yeni diaqram");
   const dialog = page.getByRole("dialog", { name: "Dəyişikliklər saxlanılmayıb", exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog).not.toContainText(/JSON/i);
@@ -152,7 +158,7 @@ test("unsaved work survives blocked-storage project switches until explicit disc
   await dialog.getByRole("button", { name: "Ləğv et", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Saxlanılmayan iş");
-  await page.getByRole("button", { name: "Yeni diaqram", exact: true }).click();
+  await projectAction(page, "Yeni diaqram");
   await dialog.getByRole("button", { name: "Saxlamadan davam et", exact: true }).click();
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Yeni iş axını");
   expect(page.url()).not.toBe(originalUrl);
@@ -169,7 +175,7 @@ test("a storage retry saves the current draft before switching once storage beco
   await page.getByLabel("Prosesin adı", { exact: true }).fill("Sonradan saxlanılan iş");
   const originalHash = new URL(page.url()).hash;
   await page.evaluate(() => { (window as unknown as { enableStorage: () => void }).enableStorage(); });
-  await page.getByRole("button", { name: "Yeni diaqram", exact: true }).click();
+  await projectAction(page, "Yeni diaqram");
   await expect(page.getByRole("dialog", { name: "Dəyişikliklər saxlanılmayıb", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Yeni iş axını");
   await page.evaluate(hash => { window.location.hash = hash; }, originalHash);

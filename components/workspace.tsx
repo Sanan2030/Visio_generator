@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, CircleHelp, FileText, GitBranch, Layers3, LoaderCircle, MoreHorizontal, Pencil, Plus, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, CircleHelp, FileText, GitBranch, Layers3, LoaderCircle, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import type { Step, StepType } from "@/lib/types";
 import { createId, createProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
 import { clampNodePosition } from "@/lib/layout";
@@ -27,13 +27,14 @@ export default function Workspace() {
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<DiagramRouteSelection | null>(null);
   const [inspectorStep, setInspectorStep] = useState<string | null>(null);
-  const [newShapeType, setNewShapeType] = useState<StepType>("task");
   const [modal, setModal] = useState<Modal>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportingWord, setExportingWord] = useState(false);
   const formScroll = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
   const previousProject = useRef("");
   const issues = useMemo(() => validateProject(project), [project]);
   const errors = issues.filter(issue => issue.level === "error");
@@ -81,7 +82,10 @@ export default function Workspace() {
 
   useEffect(() => {
     if (!menuOpen) return;
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    projectMenuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setMenuOpen(false); menuButtonRef.current?.focus(); }
+    };
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
   }, [menuOpen]);
@@ -220,6 +224,7 @@ export default function Workspace() {
     const target = project.steps.find(item => item.id !== step.id && !step.routes.some(route => route.targetId === item.id));
     if (!target) { setNotice("Yeni keçid üçün əvvəl başqa addım əlavə et."); return; }
     updateStep(step.id, { routes: [...step.routes, { targetId: target.id, label: "" }] });
+    selectRoute(step.id, step.routes.length);
   }
 
   async function exportVisio() {
@@ -250,27 +255,33 @@ export default function Workspace() {
   return <div className="studio-shell">
     <header className="studio-header">
       <a className="brand" href="#" onClick={event => event.preventDefault()} aria-label="VisioFlow ana səhifə">
-        <span className="brand-icon"><GitBranch size={21}/></span><span>visio<span className="brand-light">flow</span></span>
+        <span className="brand-icon"><GitBranch size={21}/></span><span>Visio<span className="brand-light">Flow</span></span>
       </a>
-      <div className={`save-status ${saveState}`} aria-live="polite">
-        {saveState === "saved" ? <CheckCircle2 size={14}/> : saveState === "saving" ? <LoaderCircle size={14} className="spin"/> : <CircleHelp size={14}/>}
-        <span>{saveState === "saved" ? "Saxlanıldı" : saveState === "saving" ? "Saxlanılır…" : "Yaddaş əlçatan deyil"}</span>
-      </div>
-      <div className="header-actions">
-        <button type="button" className="secondary-button sample-button" aria-label="Nümunə proses" onClick={openSample} disabled={!ready}><Layers3 size={15}/><span className="button-label">Nümunə</span></button>
-        <button type="button" className="icon-button" aria-label="Yeni diaqram" title="Yeni diaqram" disabled={!ready} onClick={()=>replace(createProject())}><Plus size={18}/></button>
-        <button type="button" className="icon-button" aria-label="Son dəyişikliyi geri al" title="Geri al" disabled={!undoCount} onClick={undo}><RotateCcw size={16}/></button>
+      <span className="header-divider" aria-hidden="true"/>
+      <div className="header-project">
         <div className="header-menu">
-          <button type="button" className="icon-button" aria-label="Layihə menyusu" aria-expanded={menuOpen} title="Digər əməliyyatlar" onClick={()=>setMenuOpen(!menuOpen)}><MoreHorizontal size={19}/></button>
+          <button type="button" className="project-title-button" ref={menuButtonRef} aria-label="Layihə menyusu" aria-expanded={menuOpen} title={project.name||"Yeni iş axını"} onClick={()=>setMenuOpen(!menuOpen)}><span>{project.name||"Yeni iş axını"}</span><ChevronDown size={15}/></button>
           {menuOpen && <>
-            <button type="button" className="menu-backdrop" aria-label="Menyunu bağla" onClick={()=>setMenuOpen(false)}/>
-            <div className="project-menu">
+            <button type="button" className="menu-backdrop" tabIndex={-1} aria-label="Menyunu bağla" onClick={()=>{setMenuOpen(false);menuButtonRef.current?.focus();}}/>
+            <div className="project-menu" ref={projectMenuRef}>
+              <button type="button" aria-label="Yeni diaqram" disabled={!ready} onClick={()=>{setMenuOpen(false);replace(createProject());}}><Plus size={16}/> Yeni diaqram</button>
+              <button type="button" aria-label="Nümunə proses" disabled={!ready} onClick={()=>{setMenuOpen(false);openSample();}}><Layers3 size={16}/> Nümunə proses</button>
               <button type="button" onClick={()=>{setMenuOpen(false);setModal("help");}}><CircleHelp size={16}/> Necə işləyir?</button>
               <a href="/designs"><Layers3 size={16}/> İnterfeys nümunələri</a>
               <button type="button" className="danger-menu-item" onClick={()=>{setMenuOpen(false);setModal("reset");}}><Trash2 size={16}/> Hər şeyi sil</button>
             </div>
           </>}
         </div>
+        <div className={`save-status ${saveState}`} aria-live="polite">
+          {saveState === "saved" ? <Check size={14}/> : saveState === "saving" ? <LoaderCircle size={14} className="spin"/> : <CircleHelp size={14}/>}
+          <span>{saveState === "saved" ? "Saxlanılıb" : saveState === "saving" ? "Saxlanılır…" : "Yaddaş əlçatan deyil"}</span>
+        </div>
+      </div>
+      <div className="header-actions">
+        <button type="button" className="secondary-button word-export-button" aria-label="Word izahını yüklə" disabled={exportingWord || !ready} onClick={()=>void exportWord()}>
+          {exportingWord ? <LoaderCircle size={16} className="spin"/> : <FileText size={16}/>}
+          <span className="button-label">{exportingWord ? "Hazırlanır…" : "Word izahı"}</span>
+        </button>
         <button type="button" className="primary-button export-button" aria-label="Visio üçün yüklə" disabled={exporting || !ready} onClick={()=>void exportVisio()}>
           {exporting ? <LoaderCircle size={16} className="spin"/> : <ArrowDownToLine size={16}/>}
           <span className="export-label">{exporting ? "Hazırlanır…" : "Visio üçün yüklə"}</span><span className="mobile-export-label">Visio</span>
@@ -281,7 +292,7 @@ export default function Workspace() {
     <main className="studio-main">
       <section className="form-panel" aria-label="İş axını forması">
         <nav className="form-tabs" aria-label="Proses forması">
-          {tabs.map((item, index) => <button type="button" key={item.value} className={tab === item.value ? "active" : ""} aria-current={tab === item.value ? "step" : undefined} onClick={()=>setTab(item.value)}><span>{index+1}</span>{item.label}</button>)}
+          {tabs.map(item => <button type="button" key={item.value} className={tab === item.value ? "active" : ""} aria-current={tab === item.value ? "step" : undefined} onClick={()=>setTab(item.value)}>{item.label}{item.value === "steps" && project.steps.length > 0 && <span className="tab-count">{project.steps.length}</span>}</button>)}
         </nav>
         <div className="form-scroll" ref={formScroll}>
           {tab === "people" && <div className="people-form">
@@ -299,7 +310,7 @@ export default function Workspace() {
           </div>}
 
           {tab === "steps" && <div className="steps-form">
-            <div className="form-intro"><span className="section-label">02 — ADDIMLAR</span><h1>İş necə davam edir?</h1><p>Hər addımı bir forma kimi doldur. Sonra onu növbəti addıma bağla.</p></div>
+            {!project.steps.length && <div className="form-intro"><h1>İş necə davam edir?</h1><p>Hər addımı bir forma kimi doldur. Sonra onu növbəti addıma bağla.</p></div>}
             {!project.steps.length && <div className="empty-steps"><span className="empty-step-icon"><GitBranch size={24}/></span><h2>Bir başlanğıc kifayətdir.</h2><p>İlk hadisəni əlavə et, sonra axını addım-addım qur.</p><button type="button" className="primary-button" onClick={()=>addStep("start")}><Plus size={15}/> Başlanğıc əlavə et</button></div>}
             <div className="step-list">
               {project.steps.map((step,index) => {
@@ -310,8 +321,11 @@ export default function Workspace() {
                 const lane = lanes.find(item=>item.id===step.laneId);
                 return <article className={`step-card ${open ? "is-open" : ""}`} key={step.id} id={`step-form-${step.id}`}>
                   <div className="step-summary-row">
-                    <button type="button" className="step-summary" aria-label={`${index+1}-ci addımı aç`} aria-expanded={open} aria-controls={`step-fields-${step.id}`} onClick={()=>setSelected(open?null:step.id)}>
-                      <span className="step-number">{String(index+1).padStart(2,"0")}</span><span className="step-summary-text"><strong>{step.title||"Adsız addım"}</strong><small>{lane?.name||"İcraçı seçilməyib"} <span>·</span> {kind}</small></span><ChevronDown size={15} className="step-summary-chevron"/>
+                    <button type="button" className="step-summary" aria-label={`${index+1}-ci addımı aç`} aria-expanded={open} aria-controls={`step-fields-${step.id}`} onClick={()=>{
+                      if (open) { setSelected(null); setSelectedRoute(null); setInspectorStep(null); }
+                      else selectStep(step.id);
+                    }}>
+                      <span className="step-number">{index+1}</span><span className="step-summary-text"><strong>{step.title||"Adsız addım"}</strong><small>{lane?.name||"İcraçı seçilməyib"} <span>·</span> {kind}</small></span><ChevronDown size={15} className="step-summary-chevron"/>
                     </button>
                     <button type="button" className="icon-button small-icon danger-icon" aria-label={`${index+1}-ci addımı sil`} onClick={()=>deleteStep(step.id)}><Trash2 size={14}/></button>
                   </div>
@@ -322,22 +336,30 @@ export default function Workspace() {
                       <label className="field-label">İcraçı<select aria-label={`${index+1}-ci addımın icraçısı`} value={step.laneId} onChange={event=>updateStep(step.id,{laneId:event.target.value})}>{lanes.map(item=><option key={item.id} value={item.id}>{project.pools.length>1?`${item.poolName} / `:""}{item.name}</option>)}</select></label>
                     </div>
                     <label className="field-label">İşin təsviri <span className="field-hint">İstəyə bağlı</span><textarea aria-label="Addımın təsviri" rows={3} placeholder="İcraçı nə edir? Hansı qaydalar var?" maxLength={10000} value={step.description} onChange={event=>updateStep(step.id,{description:event.target.value})}/></label>
-                    {gateway && <p className="gateway-tip">{step.type==="xor"?"XOR — şərtə uyğun yalnız bir yol seçilir.":step.type==="or"?"OR — bir və ya bir neçə uyğun yol seçilir.":"AND — bütün qollar paralel davam edir. Birləşmədə bütün girişlər gözlənilir."}</p>}
+                    {gateway && <>
+                      <div className="gateway-selector" role="group" aria-label="Keçid şərtinin növü">{(["xor", "or", "and"] as const).map(type=><button type="button" key={type} aria-pressed={step.type===type} onClick={()=>updateStep(step.id,{type})}>{type.toUpperCase()}</button>)}</div>
+                      <p className="field-help">{step.type==="xor"?"XOR — şərtə uyğun yalnız bir yol seçilir.":step.type==="or"?"OR — bir və ya bir neçə uyğun yol seçilir.":"AND — bütün qollar paralel davam edir. Birləşmədə bütün girişlər gözlənilir."}</p>
+                    </>}
                     <div className="route-heading"><strong>{artifact?"Bağlı elementlər":gateway?"Çıxış qolları":"Növbəti addım"}</strong>{step.type!=="end"&&<button type="button" className="text-button" disabled={step.routes.length>=200} onClick={()=>addRoute(step)} aria-label="Keçid əlavə et"><Plus size={13}/> Keçid</button>}</div>
                     {step.type==="end"?<p className="field-help">Bu qol burada tamamlanır.</p>:<>
                       {!step.routes.length && <p className="field-help">Keçid əlavə edərək axını davam etdir.</p>}
-                      {step.routes.map((route,routeIndex)=><div className="route-card" key={routeIndex}>
-                        {step.routes.length>1 && <span className="branch-number">Qol {getRouteNumber(project,step.id,routeIndex)}</span>}
-                        <div className="route-row"><label className="field-label">Hədəf addım<select aria-label={`Keçid ${routeIndex+1} hədəfi`} value={route.targetId} onChange={event=>updateStep(step.id,{routes:step.routes.map((item,i)=>i===routeIndex?{...item,targetId:event.target.value}:item)})}><option value="">Addımı seç</option>{project.steps.filter(item=>item.id!==step.id || item.id===route.targetId).map(item=><option key={item.id} value={item.id}>{project.steps.indexOf(item)+1}. {item.title||"Adsız addım"}</option>)}</select></label><button type="button" className="icon-button small-icon" aria-label={`Keçid ${routeIndex+1} sil`} onClick={()=>removeRoute(step.id,routeIndex)}><X size={14}/></button></div>
-                        <label className="field-label">Qısa etiket<input aria-label={`Keçid ${routeIndex+1} şərti`} placeholder={gateway?"Məsələn, Təsdiq / İmtina":"İstəyə bağlı"} maxLength={80} value={route.label} onChange={event=>updateStep(step.id,{routes:step.routes.map((item,i)=>i===routeIndex?{...item,label:event.target.value}:item)})}/></label>
-                        <button type="button" className="text-button" aria-label={`Keçid ${routeIndex+1} izahını aç`} onClick={()=>selectRoute(step.id,routeIndex)}><Pencil size={13}/> {route.description?"İzahı oxu və redaktə et":"Keçidə izah əlavə et"}</button>
-                      </div>)}
+                      {step.routes.map((route,routeIndex)=>{
+                        const label = route.label.toLocaleLowerCase("az");
+                        const tone = /imtina|rədd|geri/.test(label) ? "route-tone-negative" : /təsdiq|qəbul/.test(label) ? "route-tone-positive" : "";
+                        const target = project.steps.find(item=>item.id===route.targetId);
+                        return <div className={`route-card ${tone}`} key={routeIndex}>
+                          <button type="button" className="route-summary" aria-label={`Keçid ${routeIndex+1} izahını aç`} title="Keçidin etiketini, hədəfini və izahını redaktə et" onClick={()=>selectRoute(step.id,routeIndex)}>
+                            {step.routes.length>1 && <span className="branch-number">{getRouteNumber(project,step.id,routeIndex)}</span>}
+                            <span className="route-label">{route.label || "Keçid"}</span><ArrowRight size={13}/><span className="route-target">{target?.title || "Hədəf seçilməyib"}</span>
+                          </button>
+                          <button type="button" className="icon-button small-icon route-summary-delete" aria-label={`Keçid ${routeIndex+1} sil`} onClick={()=>removeRoute(step.id,routeIndex)}><X size={14}/></button>
+                        </div>;
+                      })}
                     </>}
                   </div>}
                 </article>;
               })}
             </div>
-            {!!project.steps.length && <div className="add-step-bar"><button type="button" className="secondary-button" disabled={project.steps.length>=200} onClick={()=>addStep()}><Plus size={15}/> Addım əlavə et</button><button type="button" className="text-button" disabled={project.steps.length>=200} onClick={()=>addStep("end")}>Son hadisəsi <Plus size={13}/></button></div>}
           </div>}
 
           {tab === "explanation" && <div className="explanation-form">
@@ -350,15 +372,17 @@ export default function Workspace() {
           </div>}
         </div>
         <footer className="form-footer">
-          <div className="form-status-line"><ShieldCheck size={13}/><span>{saveState==="unavailable"?"Brauzer yaddaşına giriş yoxdur.":"Səhifə yenilənsə də işin burada qalır."}</span></div>
-          {tab==="people"?<button type="button" className="primary-button continue-button" onClick={()=>setTab("steps")}>Addımlara keç <ArrowRight size={15}/></button>:tab==="steps"?<div className="footer-navigation"><button type="button" className="text-button" onClick={()=>setTab("people")}><ArrowLeft size={14}/> İştirakçılar</button><button type="button" className="secondary-button" onClick={()=>setTab("explanation")}>İzahı yoxla <ArrowRight size={14}/></button></div>:<div className="footer-navigation"><button type="button" className="text-button" onClick={()=>setTab("steps")}><ArrowLeft size={14}/> Addımlar</button><span className="form-save-caption">.vsdx ilə Visio-da davam et</span></div>}
+          {tab==="people"?<button type="button" className="primary-button continue-button" onClick={()=>setTab("steps")}>Addımlara keç <ArrowRight size={15}/></button>:tab==="steps"?<>
+            {!!project.steps.length && <button type="button" className="secondary-button add-step-button" disabled={!ready || project.steps.length>=200} onClick={()=>addStep()}><Plus size={15}/> Addım əlavə et</button>}
+            <div className="footer-navigation"><button type="button" className="text-button" disabled={!ready || project.steps.length>=200} onClick={()=>addStep("end")}>Son hadisəsi <Plus size={13}/></button><button type="button" className="text-button" onClick={()=>setTab("explanation")}>İzahı yoxla <ArrowRight size={14}/></button></div>
+          </>:<div className="footer-navigation"><button type="button" className="text-button" onClick={()=>setTab("steps")}><ArrowLeft size={14}/> Addımlar</button><span className="form-save-caption">.vsdx ilə Visio-da davam et</span></div>}
+          <div className="form-status-line"><Check size={13}/><span>{saveState==="unavailable"?"Brauzer yaddaşına giriş yoxdur.":"Dəyişikliklər avtomatik saxlanılır"}</span></div>
         </footer>
       </section>
 
       <section className="preview-panel" aria-label="Canlı iş axını">
-        <div className="preview-heading"><div className="canvas-title"><span className="live-dot"/><h2 title={project.name||"Yeni iş axını"}>{project.name||"Yeni iş axını"}</h2><span className="live-pill">CANLI</span></div><div className="canvas-stats">{project.pools.length} pool <span>·</span> {lanes.length} lane <span>·</span> {project.steps.length} addım</div></div>
-        <div className="canvas-actionbar"><label className="canvas-shape-picker"><span className="sr-only">Yeni fiqurun növü</span><select aria-label="Yeni fiqurun növü" value={newShapeType} onChange={event=>setNewShapeType(event.target.value as StepType)}>{STEP_TYPES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label><button type="button" className="secondary-button" aria-label="Diaqramda fiqur əlavə et" disabled={!ready || project.steps.length>=200} onClick={()=>addStep(newShapeType,true)}><Plus size={14}/> Fiqur əlavə et</button><button type="button" className="text-button" aria-label="Seçilmiş fiquru redaktə et" disabled={!selected} onClick={()=>selected&&editStep(selected)}><Pencil size={14}/><span>Redaktə et</span></button></div>
-        <Diagram project={project} selectedId={selected} selectedRoute={selectedRoute} onSelect={selectStep} onEditStep={editStep} onSelectRoute={selectRoute} onEditRoute={selectRoute} onMoveStep={moveStep} onResetLayout={resetLayout} onConnect={connectSteps} onDeleteStep={deleteStep}>
+        <div className="preview-heading"><div className="canvas-title"><span className="live-dot"/><h2>Canlı diaqram</h2></div><div className="canvas-stats">{project.pools.length} pool <span>·</span> {lanes.length} icraçı <span>·</span> {project.steps.length} addım</div></div>
+        <Diagram project={project} selectedId={selected} selectedRoute={selectedRoute} onSelect={selectStep} onEditStep={editStep} onSelectRoute={selectRoute} onEditRoute={selectRoute} onMoveStep={moveStep} onResetLayout={resetLayout} onConnect={connectSteps} onDeleteStep={deleteStep} onAddShape={type=>addStep(type,true)} controlsDisabled={!ready || project.steps.length>=200} onUndo={undo} canUndo={undoCount>0}>
           {(inspectorStep || selectedRoute) && <CanvasInspector project={project} stepId={inspectorStep} routeSelection={selectedRoute} onUpdate={updateStep} onDeleteStep={deleteStep} onDeleteRoute={removeRoute} onClose={()=>{setInspectorStep(null);setSelectedRoute(null);}}/>}
         </Diagram>
       </section>

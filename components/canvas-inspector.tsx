@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { ArrowRight, RotateCcw, Trash2, X } from "lucide-react";
 import { STEP_TYPES } from "@/lib/process";
 import { getRouteNumber, getStepNumber } from "@/lib/step-numbering";
@@ -17,6 +18,18 @@ interface InspectorProps {
 }
 
 export default function CanvasInspector({ project, stepId, routeSelection, onUpdate, onDeleteStep, onDeleteRoute, onClose }: InspectorProps) {
+  const panelRef = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    opener.current = document.activeElement as HTMLElement | null;
+    return () => {
+      if (opener.current?.isConnected) opener.current.focus({ preventScroll: !window.matchMedia("(max-width: 800px)").matches });
+    };
+  }, []);
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLElement>("input, textarea, select")?.focus({ preventScroll: true });
+    if (window.matchMedia("(max-width: 800px)").matches) panelRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [stepId, routeSelection?.sourceId, routeSelection?.routeIndex]);
   const step = project.steps.find(item => item.id === (routeSelection?.sourceId ?? stepId));
   if (!step) return null;
   const route = routeSelection ? step.routes[routeSelection.routeIndex] : null;
@@ -29,7 +42,7 @@ export default function CanvasInspector({ project, stepId, routeSelection, onUpd
     onUpdate(step.id, { routes: step.routes.map((item, index) => index === routeSelection.routeIndex ? { ...item, ...patch } : item) });
   }
 
-  return <aside className="canvas-inspector" aria-label={routeSelection ? "Keçid redaktəsi" : "Addım redaktəsi"} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
+  return <aside className="canvas-inspector" ref={panelRef} aria-label={routeSelection ? "Keçid redaktəsi" : "Addım redaktəsi"} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
     event.stopPropagation();
     if (event.key === "Escape") onClose();
   }}>
