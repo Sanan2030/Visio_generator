@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Asılılıqları quraşdır
+        run: npm ci
+      - name: Kod qaydalarını yoxla
+        run: npm run lint
+      - name: TypeScript-i yoxla
+        run: npm run typecheck
+      - name: Unit testlərini işə sal
+        run: npm test
+      - name: Production versiyasını hazırla
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1

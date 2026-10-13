@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Circle, Copy, Diamond, Expand, Minus, MousePointer2, Move, Pencil, Plus, Redo2, RotateCcw, Scan, Shrink, Square, StickyNote, Trash2, Undo2, Waypoints } from "lucide-react";
 import { clampNodePosition, layoutProject } from "@/lib/layout";
 import { displayRouteLabel, getStepNumber } from "@/lib/step-numbering";
@@ -154,6 +154,24 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   const diagramWidth = Math.max(560, layout.width);
   const diagramHeight = Math.max(360, layout.height);
 
+  const releasePointer = useCallback((pointerId: number) => {
+    const element = captureElement.current;
+    captureElement.current = null;
+    if (element?.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
+    const view = viewport.current;
+    if (view?.hasPointerCapture(pointerId)) view.releasePointerCapture(pointerId);
+  }, []);
+
+  const cancelGesture = useCallback(() => {
+    const current = gesture.current;
+    gesture.current = null;
+    setDraftPosition(null);
+    setDraggingId(null);
+    setConnection(null);
+    setReconnectPreview(null);
+    if (current) releasePointer(current.pointerId);
+  }, [releasePointer]);
+
   useEffect(() => {
     if (previousProject.current === project.id) return;
     previousProject.current = project.id;
@@ -185,7 +203,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
       document.removeEventListener("fullscreenchange", handleFullscreen);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, []);
+  }, [cancelGesture]);
 
   useEffect(() => {
     if (!expanded || !panel.current) return;
@@ -238,10 +256,11 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   useEffect(() => {
     // A pending endpoint belongs to one exact route in one model snapshot.
     // Selection changes, deletion and history must never retarget a stale route.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Release DOM pointer capture and clear its preview when the model snapshot invalidates it.
     cancelGesture();
     setReconnectChoice(null);
     setConnectionSource(null);
-  }, [project.steps, selectedRoute?.sourceId, selectedRoute?.routeIndex]);
+  }, [project.steps, selectedRoute?.sourceId, selectedRoute?.routeIndex, cancelGesture]);
 
   useEffect(() => {
     const view = viewport.current;
@@ -291,24 +310,6 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   function capturePointer(pointerId: number, element: SVGElement | HTMLDivElement | null = viewport.current) {
     captureElement.current = element;
     try { element?.setPointerCapture(pointerId); } catch { /* The pointer may have ended before capture. */ }
-  }
-
-  function releasePointer(pointerId: number) {
-    const element = captureElement.current;
-    captureElement.current = null;
-    if (element?.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
-    const view = viewport.current;
-    if (view?.hasPointerCapture(pointerId)) view.releasePointerCapture(pointerId);
-  }
-
-  function cancelGesture() {
-    const current = gesture.current;
-    gesture.current = null;
-    setDraftPosition(null);
-    setDraggingId(null);
-    setConnection(null);
-    setReconnectPreview(null);
-    if (current) releasePointer(current.pointerId);
   }
 
   function beginNodeDrag(event: ReactPointerEvent<SVGGElement>, id: string) {
@@ -756,11 +757,17 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             const active = (reconnectChoice?.selection.sourceId === selectedRoute.sourceId && reconnectChoice.selection.routeIndex === selectedRoute.routeIndex && reconnectChoice.endpoint === endpoint)
               || (reconnectPreview?.selection.sourceId === selectedRoute.sourceId && reconnectPreview.selection.routeIndex === selectedRoute.routeIndex && reconnectPreview.endpoint === endpoint);
             return <g key={endpoint} className={`diagram-route-handle${active ? " is-active" : ""}`} data-editor-only="route-handle" data-route-handle={endpoint} data-route-source={selectedRoute.sourceId} data-route-index={selectedRoute.routeIndex} role="button" tabIndex={0} aria-label={endpoint === "source" ? "Keçidin başlanğıcını dəyiş" : "Keçidin hədəfini dəyiş"} aria-pressed={active} style={{ touchAction: "none", pointerEvents: reconnectChoice ? "none" : undefined }}
-              onPointerDown={(event) => beginReconnect(event, selectedRoute, endpoint)}
+              onPointerDown={(event) => {
+                // eslint-disable-next-line react-hooks/refs -- This pointer-event callback reads DOM capture refs after render, never while rendering the handle.
+                beginReconnect(event, selectedRoute, endpoint);
+              }}
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault(); event.stopPropagation(); cancelGesture(); setConnectionSource(null); setActiveTool("select");
+                  event.preventDefault(); event.stopPropagation();
+                  // eslint-disable-next-line react-hooks/refs -- This keyboard-event callback releases DOM pointer capture after render.
+                  cancelGesture();
+                  setConnectionSource(null); setActiveTool("select");
                   setReconnectChoice({ selection: selectedRoute, endpoint });
                 }
               }}>

@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import { layoutProject } from "./layout";
 import { isProject } from "./process";
 import { displayRouteLabel, getStepNumber } from "./step-numbering";
-import type { LayoutEdge, LayoutNode, LayoutPoint, Project, Step } from "./types";
+import { STEP_METADATA_FIELDS, type LayoutEdge, type LayoutNode, type LayoutPoint, type Project, type Step, type StepMetadataKey } from "./types";
 
 const VISIO_NS = "http://schemas.microsoft.com/office/visio/2012/main";
 const REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -93,8 +93,17 @@ function nativeShape(options: NativeShapeOptions): string {
 }
 
 function properties(step: Step): string {
-  const values = { ProjectStepId: step.id, StepType: step.type, Description: step.description };
-  return `<Section N="Property">${Object.entries(values).map(([key, value]) => `<Row N="${key}">${cell("Label", key)}${cell("Type", 0)}${cell("Value", value)}</Row>`).join("")}</Section>`;
+  const values: [string, string, string][] = [
+    ["ProjectStepId", "ProjectStepId", step.id],
+    ["StepType", "StepType", step.type],
+    ["Description", "Description", step.description],
+  ];
+  const metadataKeys: Record<StepMetadataKey, string> = { duration: "Duration", system: "System", document: "Document" };
+  for (const field of STEP_METADATA_FIELDS) {
+    const value = step[field.key];
+    if (value?.trim()) values.push([metadataKeys[field.key], field.label, value]);
+  }
+  return `<Section N="Property">${values.map(([key, label, value]) => `<Row N="${key}">${cell("Label", label)}${cell("Type", 0)}${cell("Value", value)}</Row>`).join("")}</Section>`;
 }
 
 function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number, anchors: RelativePoint[], displayText = step.title): string {

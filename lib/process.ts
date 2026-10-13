@@ -1,4 +1,4 @@
-import type { Project, Step, StepType, ValidationIssue } from "./types";
+import { STEP_METADATA_FIELDS, type Project, type Step, type StepType, type ValidationIssue } from "./types";
 
 export const STEP_TYPES: { value: StepType; label: string }[] = [
   { value: "start", label: "Başlanğıc" },
@@ -120,6 +120,7 @@ export function isProject(input: unknown): input is Project {
     if (!record(step) || !addId(step.id) || !idValue(step.laneId) || typeof step.type !== "string" || !TYPES.has(step.type)
       || !textValue(step.title, 500) || !textValue(step.description, 20000)
       || !Array.isArray(step.routes) || step.routes.length > 200) return false;
+    if (STEP_METADATA_FIELDS.some(field => step[field.key] !== undefined && !textValue(step[field.key], field.maxLength))) return false;
     if (step.position !== undefined && (!record(step.position)
       || typeof step.position.x !== "number" || !Number.isFinite(step.position.x)
       || typeof step.position.y !== "number" || !Number.isFinite(step.position.y)
@@ -132,6 +133,81 @@ export function isProject(input: unknown): input is Project {
     }
   }
   return true;
+}
+
+/**
+ * Pair a split with its first shared rejoin, including plain tasks and end events.
+ * Retry paths back to the split are a boundary; paths ending elsewhere or in a
+ * closed component make the pairing ambiguous and are left to other checks.
+ */
+function gatewayPairIssues(flowSteps: Step[], poolByLane: Map<string, string>): ValidationIssue[] {
+  const byId = new Map(flowSteps.map(step => [step.id, step]));
+  const poolByStep = new Map(flowSteps.map(step => [step.id, poolByLane.get(step.laneId)]));
+  // Cross-pool message flows cannot form a sequence-flow split/join pair.
+  const outputs = new Map(flowSteps.map(step => [step.id, step.type === "end" ? [] :
+    [...new Set(step.routes.map(route => route.targetId).filter(id => byId.has(id)
+      && poolByStep.get(step.id) !== undefined && poolByStep.get(step.id) === poolByStep.get(id)))]]));
+  const incoming = new Map(flowSteps.map(step => [step.id, [] as string[]]));
+  for (const [source, targets] of outputs) for (const target of targets) incoming.get(target)!.push(source);
+  const issues: ValidationIssue[] = [];
+
+  for (const split of flowSteps) {
+    const branches = outputs.get(split.id)!;
+    if ((split.type !== "and" && split.type !== "xor") || branches.length < 2) continue;
+    // Two immediate returns cannot share a rejoin before the retry boundary.
+    if (branches.filter(id => outputs.get(id)!.includes(split.id)).length > 1) continue;
+    const distances = branches.map(initial => {
+      const seen = new Map<string, number>();
+      if (initial === split.id) return seen;
+      const queue = [initial];
+      seen.set(initial, 0);
+      for (let index = 0; index < queue.length; index++) {
+        const id = queue[index];
+        for (const target of outputs.get(id)!) {
+          if (target === split.id || seen.has(target)) continue;
+          seen.set(target, seen.get(id)! + 1);
+          queue.push(target);
+        }
+      }
+      return seen;
+    });
+    const candidates = flowSteps.filter(step => step.id !== split.id && distances.every(seen => seen.has(step.id)))
+      .map(step => {
+        const lengths = distances.map(seen => seen.get(step.id)!);
+        return { step, maximum: Math.max(...lengths), total: lengths.reduce((sum, length) => sum + length, 0) };
+      }).sort((a, b) => a.maximum - b.maximum || a.total - b.total);
+
+    const first = candidates.find(({ step: candidate }) => {
+      const canReach = new Set<string>([candidate.id]);
+      const reverse = [candidate.id];
+      for (let index = 0; index < reverse.length; index++) {
+        for (const source of incoming.get(reverse[index])!) {
+          if (source === split.id || canReach.has(source)) continue;
+          canReach.add(source);
+          reverse.push(source);
+        }
+      }
+      const seen = new Set<string>();
+      const queue = [...branches];
+      for (let index = 0; index < queue.length; index++) {
+        const id = queue[index];
+        if (id === candidate.id || seen.has(id)) continue;
+        if (id === split.id || !canReach.has(id)) return false;
+        seen.add(id);
+        queue.push(...outputs.get(id)!);
+      }
+      return true;
+    })?.step;
+    if (!first || !((split.type === "and" && first.type === "xor") || (split.type === "xor" && first.type === "and"))) continue;
+    const kind = split.type.toUpperCase();
+    const joinedKind = first.type.toUpperCase();
+    issues.push({
+      level: "error",
+      stepId: first.id,
+      message: `“${split.title || "Adsız addım"}” ${kind} ilə ayrılır, amma “${first.title || "Adsız addım"}” ${joinedKind} ilə birləşir. ${split.type === "and" ? "Paralel" : "Alternativ"} qollar üçün ${kind} birləşməsi seçin.`,
+    });
+  }
+  return issues;
 }
 
 export function validateProject(project: Project): ValidationIssue[] {
@@ -222,6 +298,8 @@ export function validateProject(project: Project): ValidationIssue[] {
     const canFinish = visit(ends.map((step) => step.id), (id) => incoming.get(id) || []);
     for (const step of flowSteps) if (!canFinish.has(step.id)) add("warning", `“${step.title}” addımından son hadisəsinə yol yoxdur.`, step.id);
   }
+  const poolByLane = new Map(project.pools.flatMap(pool => pool.lanes.map(lane => [lane.id, pool.id] as const)));
+  issues.push(...gatewayPairIssues(flowSteps, poolByLane));
   return issues;
 }
 
@@ -239,6 +317,10 @@ export function explainProject(project: Project): string {
     const kind = STEP_TYPES.find((type) => type.value === step.type)?.label || step.type;
     lines.push("", `${index + 1}. ${step.title || "Adsız addım"} — ${laneNames.get(step.laneId) || "İcraçı seçilməyib"} (${kind})`);
     if (step.description.trim()) lines.push(step.description.trim());
+    for (const field of STEP_METADATA_FIELDS) {
+      const value = step[field.key]?.trim();
+      if (value) lines.push(`${field.label}: ${value}`);
+    }
     const outputs = step.routes.filter((route) => byId.has(route.targetId) && !ARTIFACT_TYPES.has(byId.get(route.targetId)!.type));
     if (step.type === "xor" && outputs.length > 1) lines.push("XOR: şərtə görə yalnız bir çıxış seçilir.");
     if (step.type === "or" && outputs.length > 1) lines.push("OR: şərtlərə uyğun bir və ya bir neçə çıxış seçilir.");

@@ -26,6 +26,15 @@ export interface StepPosition {
   y: number;
 }
 
+export type StepMetadataKey = "duration" | "system" | "document";
+
+/** Shared form, validation and export definitions; existing drafts omit these fields. */
+export const STEP_METADATA_FIELDS = [
+  { key: "duration", label: "Müddət (SLA)", maxLength: 300, placeholder: "Məsələn, 2 iş günü" },
+  { key: "system", label: "Sistem", maxLength: 500, placeholder: "Məsələn, sənəd dövriyyəsi sistemi" },
+  { key: "document", label: "Sənəd", maxLength: 500, placeholder: "Məsələn, müraciət forması" },
+] as const satisfies readonly { key: StepMetadataKey; label: string; maxLength: number; placeholder: string }[];
+
 export interface Step {
   id: string;
   laneId: string;
@@ -34,6 +43,9 @@ export interface Step {
   description: string;
   routes: Route[];
   position?: StepPosition;
+  duration?: string;
+  system?: string;
+  document?: string;
 }
 
 export interface Lane {

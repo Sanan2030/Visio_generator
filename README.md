@@ -14,6 +14,10 @@ Addım kartındakı yuxarı/aşağı düymələri forma sırasını dəyişir. *
 
 **Nümunə proses** menyusunda “Müştəri müraciətləri” ilə yanaşı **Təsdiq prosesi**, **Sorğu-cavab** və **İşə qəbul** şablonları var. Hər açılış yeni layihə yaradır, əvvəlki saxlanmış iş öz hash ünvanında qalır. Layihə menyusundakı **SVG kimi yüklə** və **PNG kimi yüklə** bütün diaqramı şəkil kimi çıxarır. Azərbaycan hərfləri üçün yerli DM Sans/DM Mono şriftləri SVG-yə daxil edilir; redaktə tutacaqları və seçim vurğuları ixrac edilmir. PNG böyük diaqramlarda maksimum 16 milyon piksel və 8192 piksel tərəf həddində yaradılır.
 
+Addımın formasında və diaqram redaktə panelində **Əlavə məlumatlar** bölməsi var: **Müddət (SLA)**, **Sistem**, **Sənəd**. Bunlar istəyə bağlı mətn sahələridir; boş saxlananda köhnə layihənin davranışı dəyişmir. SLA üçün məsələn “2 iş günü” yazmaq olar; sahə prosesin vaxtını avtomatik ölçmür. Doldurulmuş məlumatlar izahda və VSDX fiqurunun Shape Data hissəsində görünür. **İzah** bölməsində seçdiyin məlumatlar Word və önbaxış cədvəlində ayrıca sütun olur; seçilməyən məlumatlar təsvirin içində qalır. Sütun seçimi cari açıq sessiyaya aiddir.
+
+Struktur yoxlaması AND ilə ayrılıb XOR ilə birləşən və XOR ilə ayrılıb AND ilə birləşən qolları xəta kimi göstərir. Yoxlama eyni pool daxilindəki ilk ortaq birləşməyə əsaslanır; ayrı sonluqlar və qeyri-müəyyən dövrlər üçün cütlük təxmin etmir. Əvvəlki adi tapşırıqda birləşmiş yollar və pool-lar arasında mesaj keçidləri ayrıca split/join cütlüyü sayılmır.
+
 Diaqramın aşağısındakı alət panelində **Seç**, **Sahəni sürüşdür**, başlanğıc, tapşırıq, qərar, keçid və qeyd düymələri var. Seçilmiş elementin üstündə ayrıca **Redaktə et**, **Surətini yarat** və **Sil** əməliyyatları görünür. Sahəni sürüşdür aləti seçiləndə fiqurun üzərindən sürükləmək də yalnız görünüşü hərəkət etdirir. **Keçid çək** seçilmiş addımı növbəti kliklənən fiqura bağlayır. Digər element növlərini forma və ya redaktə panelində seçmək olar.
 
 Fokus fiqurda olduqda ox düymələri onu 1 vahid, Shift + ox isə 10 vahid hərəkət etdirir; F2 redaktə panelini açır, Delete fiquru silir. Sürüşdürmə zamanı Esc hərəkəti ləğv edir. Fokus diaqram sahəsində olduqda oxlar sahəni sürüşdürür. Aşağı sağdakı **Avtomatik düz** əl ilə yerləşdirməni sıfırlayır; **Geri al** əvvəlki vəziyyəti qaytarır, **Yenidən tətbiq et** isə geri alınmış dəyişikliyi bərpa edir. Böyütmə, ekrana sığdırma və tam ekran rejimində redaktə də mümkündür. Yuxarıdakı proses adına basmaq **Yeni diaqram**, **Nümunə proses**, kömək və silmə menyusunu açır; **Word izahı** birbaşa `.docx` cədvəlini yükləyir.
@@ -61,6 +65,7 @@ Standart port 3000-dır.
 
 ```sh
 npm run typecheck
+npm run lint
 npm test
 npm run test:e2e
 npm run build
@@ -69,13 +74,15 @@ npm start
 
 Unit testlər proses qaydalarını, dövrlərin yerləşməsini, saxlanmış layihənin strukturunu və VSDX ZIP/XML paketini yoxlayır. Brauzer testləri forma redaktəsi, dərhal bərpa, hash sıfırlama, yaddaş nasazlığı, təsdiqli silmə, Visio ixracı və mobil diaqram idarəsini yoxlayır. E2E testi `CHROMIUM_PATH` verilərsə onu, yoxdursa `/usr/bin/chromium` mövcud olduqda sistem Chromium-unu istifadə edir. Digər maşında `npx playwright install chromium` ilə brauzeri quraşdır.
 
+`.github/workflows/ci.yml` hər `main` push-u və pull request üçün Node 24 ilə `npm ci`, ESLint, typecheck, unit testlər və build işlədir. Tam production brauzer sınağı üçün əvvəl `npm run build` və `npm start`, ayrı terminalda isə `VISIOFLOW_PRODUCTION_TESTS=1 npm run test:e2e` işlədirik; bu rejim `/designs` səhifəsinin gizlədilməsini də yoxlayır.
+
 Word sənədi ayrıca Office Open XML paketidir; həqiqi cədvəl, təkrarlanan başlıq və Azərbaycan hərfləri saxlanılır. Əlavə paket tələb olunmur. Word/VSDX struktur testlərindən başqa sürüklənən mövqelərin bərpası, native Visio koordinatları, bağlı oxlar və qol nömrələri də yoxlanılır.
 
 ## İnterfeys nümunələri
 
 Ana səhifədə **D — İşıqlı iş masası** dizaynı işləyir. [Yeni interfeysin görünüşü](public/design-previews/design-d.png).
 
-`/designs` səhifəsində üç qaranlıq interfeys variantına baxmaq olar: **A — Addım-addım forma**, **B — Diaqram mərkəzdə**, **C — Cədvəldən diaqrama**. Bunlar görünüşü müqayisə etmək üçündür; səhifə mövcud layihəni dəyişmir. İşlək redaktor ana səhifədədir. Nümunələrdə fiqur və kiçik keçid etiketini seçərək panel görünüşünü də müqayisə etmək olar.
+Lokal inkişaf rejimində `/designs` səhifəsində üç qaranlıq interfeys variantına baxmaq olar: **A — Addım-addım forma**, **B — Diaqram mərkəzdə**, **C — Cədvəldən diaqrama**. Production-da bu səhifə 404 qaytarır və menyuda göstərilmir. Nümunələr görünüşü müqayisə etmək üçündür; səhifə mövcud layihəni dəyişmir. İşlək redaktor ana səhifədədir.
 
 Redaktə davranışı üçün yoxlanmış rəsmi açıq mənbə nümunələri: [draw.io mətn redaktəsi](https://github.com/jgraph/drawio/blob/dev/src/main/webapp/js/grapheditor/Graph.js), [bpmn-js iki kliklə redaktə](https://github.com/bpmn-io/bpmn-js/blob/develop/lib/features/label-editing/LabelEditingProvider.js), [diagram-js fiqur hərəkəti](https://github.com/bpmn-io/diagram-js/blob/develop/lib/features/move/Move.js), [Excalidraw imkanları](https://github.com/excalidraw/excalidraw#features).
 

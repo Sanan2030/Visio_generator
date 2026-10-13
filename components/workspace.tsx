@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, CircleHelp, FileText, GitBranch, Layers3, LoaderCircle, Plus, ShieldCheck, Trash2, X } from "lucide-react";
-import type { Step, StepType } from "@/lib/types";
+import { STEP_METADATA_FIELDS, type Step, type StepMetadataKey, type StepType } from "@/lib/types";
 import { createId, createProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
 import { clampNodePosition } from "@/lib/layout";
 import { duplicateDiagramStep, moveDiagramStep, reconnectDiagramRoute } from "@/lib/diagram-edit";
@@ -14,6 +14,7 @@ import { useProject } from "@/lib/use-project";
 import Diagram, { type DiagramRouteSelection } from "./diagram";
 import CanvasInspector from "./canvas-inspector";
 import ExplanationTable from "./explanation-table";
+import StepMetadataFields from "./step-metadata-fields";
 
 type Tab = "people" | "steps" | "explanation";
 type Modal = "reset" | "sample" | "help" | "table" | null;
@@ -35,6 +36,7 @@ export default function Workspace() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportingWord, setExportingWord] = useState(false);
+  const [wordColumns, setWordColumns] = useState<StepMetadataKey[]>([]);
   const [exportingImage, setExportingImage] = useState<"svg" | "png" | null>(null);
   const [templateId, setTemplateId] = useState<ProcessTemplateId | "customer">("customer");
   const formScroll = useRef<HTMLDivElement>(null);
@@ -59,10 +61,12 @@ export default function Workspace() {
     formScroll.current?.scrollTo({ top: 0 });
   }, [ready, project.id, project.steps]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- Cancel editor selections when a restored model removes their targets. */
   useEffect(() => {
     if (inspectorStep && !project.steps.some(step => step.id === inspectorStep)) setInspectorStep(null);
     if (selectedRoute && !project.steps.find(step => step.id === selectedRoute.sourceId)?.routes[selectedRoute.routeIndex]) { setSelectedRoute(null); setRouteEditorOpen(false); }
   }, [project.steps, inspectorStep, selectedRoute]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (tab !== "steps" || !selected) return;
@@ -324,7 +328,7 @@ export default function Workspace() {
     setExportingWord(true);
     try {
       const { generateDocx } = await import("@/lib/docx");
-      const data = await generateDocx(project);
+      const data = await generateDocx(project, { columns: wordColumns });
       download(new Uint8Array(data).buffer, `${filename(project.name)}-izah.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       setNotice("Word cədvəli hazırdır. Yükləmə başladıldı.");
     } catch { setNotice("Word faylı hazırlana bilmədi. Yenidən yoxla."); }
@@ -363,7 +367,7 @@ export default function Workspace() {
               <button type="button" aria-label="SVG kimi yüklə" disabled={!ready || exportingImage!==null} onClick={()=>void exportImage("svg")}><ArrowDownToLine size={16}/> SVG kimi yüklə</button>
               <button type="button" aria-label="PNG kimi yüklə" disabled={!ready || exportingImage!==null} onClick={()=>void exportImage("png")}><ArrowDownToLine size={16}/> PNG kimi yüklə</button>
               <button type="button" onClick={()=>{setMenuOpen(false);setModal("help");}}><CircleHelp size={16}/> Necə işləyir?</button>
-              <a href="/designs"><Layers3 size={16}/> İnterfeys nümunələri</a>
+              {process.env.NODE_ENV !== "production" && <a href="/designs"><Layers3 size={16}/> İnterfeys nümunələri</a>}
               <button type="button" className="danger-menu-item" onClick={()=>{setMenuOpen(false);setModal("reset");}}><Trash2 size={16}/> Hər şeyi sil</button>
             </div>
           </>}
@@ -436,6 +440,7 @@ export default function Workspace() {
                       <label className="field-label">İcraçı<select aria-label={`${index+1}-ci addımın icraçısı`} value={step.laneId} onChange={event=>updateStep(step.id,{laneId:event.target.value})}>{lanes.map(item=><option key={item.id} value={item.id}>{project.pools.length>1?`${item.poolName} / `:""}{item.name}</option>)}</select></label>
                     </div>
                     <label className="field-label">İşin təsviri <span className="field-hint">İstəyə bağlı</span><textarea aria-label="Addımın təsviri" rows={3} placeholder="İcraçı nə edir? Hansı qaydalar var?" maxLength={10000} value={step.description} onChange={event=>updateStep(step.id,{description:event.target.value})}/></label>
+                    <StepMetadataFields key={step.id} step={step} labelPrefix={`${index+1}-ci addım`} onChange={patch=>updateStep(step.id,patch)}/>
                     {gateway && <>
                       <div className="gateway-selector" role="group" aria-label="Keçid şərtinin növü">{(["xor", "or", "and"] as const).map(type=><button type="button" key={type} aria-pressed={step.type===type} onClick={()=>updateStep(step.id,{type})}>{type.toUpperCase()}</button>)}</div>
                       <p className="field-help">{step.type==="xor"?"XOR — şərtə uyğun yalnız bir yol seçilir.":step.type==="or"?"OR — bir və ya bir neçə uyğun yol seçilir.":"AND — bütün qollar paralel davam edir. Birləşmədə bütün girişlər gözlənilir."}</p>
@@ -467,8 +472,13 @@ export default function Workspace() {
             <div className={`validation-card ${errors.length?"has-errors":""}`}><ShieldCheck size={20}/><div><strong>{errors.length?`${errors.length} düzəliş tələb olunur`:"Struktur yoxlaması tamamlandı"}</strong><p>{errors.length?"Aşağıdakı xətaları düzəlt.":"Biznes qaydalarını da nəzərdən keçir."}</p></div></div>
             {!!issues.length && <details className="validation-details" open={errors.length>0}><summary>Yoxlama qeydləri <span>{issues.length}</span></summary><ul className="issue-list">{issues.map((issue,index)=><li key={index} className={issue.level}><span>{issue.level==="error"?"Xəta":"Qeyd"}</span><button type="button" onClick={()=>{if(issue.stepId){setSelected(issue.stepId);setTab("steps");}else setTab("people");}}>{issue.message}</button></li>)}</ul></details>}
             <div className="explanation-toolbar"><span>WORD CƏDVƏLİ</span><button type="button" className="text-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={13}/> Word cədvəli yüklə</button></div>
+            <fieldset className="word-column-options"><legend>Əlavə məlumatları ayrıca sütunda göstər</legend>
+              {STEP_METADATA_FIELDS.map(field=><label key={field.key}><input type="checkbox" aria-label={`${field.label} sütunu`} checked={wordColumns.includes(field.key)}
+                onChange={event=>setWordColumns(current=>event.target.checked?[...current,field.key]:current.filter(key=>key!==field.key))}/>{field.label}</label>)}
+              <p>Seçilməyən məlumatlar təsvirin içində qalır.</p>
+            </fieldset>
             <button type="button" className="secondary-button word-expand-button" onClick={()=>setModal("table")}><FileText size={14}/> İzah cədvəlinə geniş bax</button>
-            <ExplanationTable project={project} onSelect={(id,index)=>index===undefined?editStep(id):selectRoute(id,index)}/>
+            <ExplanationTable project={project} options={{columns:wordColumns}} onSelect={(id,index)=>index===undefined?editStep(id):selectRoute(id,index)}/>
           </div>}
         </div>
         <footer className="form-footer">
@@ -493,7 +503,7 @@ export default function Workspace() {
       <button type="button" className="modal-close icon-button" aria-label="Pəncərəni bağla" onClick={closeModal}><X size={18}/></button>
       <span className={`modal-icon ${activeModal==="reset"||activeModal==="unsaved"?"red":""}`}>{activeModal==="reset"?<Trash2 size={24}/>:activeModal==="sample"?<Layers3 size={24}/>:<CircleHelp size={24}/>}</span>
       <h2 id="modal-title">{activeModal==="reset"?"Hər şeyi silmək istəyirsən?":activeModal==="sample"?"Nümunə prosesi açaq?":activeModal==="unsaved"?"Dəyişikliklər saxlanılmayıb":activeModal==="table"?"İş axınının izah cədvəli":"Formadan Visio diaqramına"}</h2>
-      {activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru başqa iştirakçının sahəsinə sürüşdür: izahda icraçı da dəyişir. İki kliklə və ya Redaktə et düyməsi ilə paneli aç. Seçilmiş fiqurun + tutacağını digər fiqura apararaq yeni keçid yarat.</p><p><strong>3. Keçidə izah yaz.</strong> Xətti seçib ucundakı dairəni başqa fiqura sürüşdürərək oxun başlanğıcını və ya hədəfini dəyiş. Etiketə basıb qısa mətni və ətraflı izahı doldur. İcraçı, hədəf və qol nömrələri Word cədvəlində də yenilənir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
+      {activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project} options={{columns:wordColumns}}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru başqa iştirakçının sahəsinə sürüşdür: izahda icraçı da dəyişir. İki kliklə və ya Redaktə et düyməsi ilə paneli aç. Seçilmiş fiqurun + tutacağını digər fiqura apararaq yeni keçid yarat.</p><p><strong>3. Keçidə izah yaz.</strong> Xətti seçib ucundakı dairəni başqa fiqura sürüşdürərək oxun başlanğıcını və ya hədəfini dəyiş. Etiketə basıb qısa mətni və ətraflı izahı doldur. İcraçı, hədəf və qol nömrələri Word cədvəlində də yenilənir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
         {activeModal==="sample" && <fieldset className="template-options"><legend>Hazır proses seç</legend>
           {[{id:"customer", name:"Müştəri müraciətləri", description:"Əvvəlki operator, vizaçı və icraçı nümunəsi."}, ...PROCESS_TEMPLATES].map(item=><label key={item.id} className={`template-option ${templateId===item.id ? "is-selected" : ""}`}>
             <input type="radio" name="process-template" aria-label={item.name} checked={templateId===item.id} onChange={()=>setTemplateId(item.id as ProcessTemplateId|"customer")}/><span><strong>{item.name}</strong><small>{item.description}</small></span>

@@ -299,6 +299,20 @@ h1, h2, h3, p { margin: 0; }
 .explanation-text { margin: 16px 0 0; font: inherit; font-size: 13px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
 .word-expand-button { width: 100%; margin: 12px 0 16px; }
 .word-preview { margin: 0; padding: 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-family: inherit; white-space: normal; }
+.word-preview .explanation-table.with-metadata-columns { min-width: calc(400px + var(--metadata-column-count) * 150px); }
+.explanation-table .metadata-cell { white-space: pre-wrap; }
+.word-column-options { display: flex; flex-wrap: wrap; gap: 9px 16px; margin: 0 0 18px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.word-column-options legend { padding: 0 4px; font-size: 12px; font-weight: 600; }
+.word-column-options label { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; }
+.word-column-options input { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent); }
+.word-column-options p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 11px; }
+.step-metadata { margin: 0 0 16px; border: 1px solid var(--line); border-radius: 8px; }
+.step-metadata summary { display: flex; align-items: center; gap: 8px; padding: 11px 12px; font-size: 12px; font-weight: 600; cursor: pointer; list-style: none; }
+.step-metadata summary::-webkit-details-marker { display: none; }
+.step-metadata summary small { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 400; }
+.step-metadata[open] summary > svg { transform: rotate(180deg); }
+.step-metadata-fields { padding: 4px 12px 12px; }
+.step-metadata-fields .field-label:last-child { margin-bottom: 0; }
 .explanation-table { width: 100%; border-collapse: collapse; table-layout: fixed; color: var(--ink); font-size: 12px; line-height: 1.7; }
 .explanation-table th { padding: 12px 9px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--control-line); background: var(--surface-hover); font-size: 11px; font-weight: 600; }
 .explanation-table th:first-child { width: 57px; }

@@ -6,6 +6,7 @@ import { STEP_TYPES } from "@/lib/process";
 import { getRouteNumber, getStepNumber } from "@/lib/step-numbering";
 import type { Project, Step, StepType } from "@/lib/types";
 import type { DiagramRouteSelection } from "./diagram";
+import StepMetadataFields from "./step-metadata-fields";
 
 interface InspectorProps {
   project: Project;
@@ -69,6 +70,7 @@ export default function CanvasInspector({ project, stepId, routeSelection, onUpd
         <label className="field-label">İcraçı<select aria-label="Diaqram addımının icraçısı" aria-describedby="inspector-lane-edit-hint" value={step.laneId} onChange={event => onUpdate(step.id, { laneId: event.target.value })}>{lanes.map(item => <option key={item.id} value={item.id}>{project.pools.length > 1 ? `${item.poolName} / ` : ""}{item.name}</option>)}</select></label>
         <p className="field-help inspector-lane-hint" id="inspector-lane-edit-hint">Fiquru başqa iştirakçının zolağına sürüşdürə və ya burada icraçını dəyişə bilərsən. İzah cədvəlində icraçı da yenilənir.</p>
         <label className="field-label">İşin təsviri<textarea aria-label="Diaqram addımının təsviri" rows={5} value={step.description} maxLength={10000} placeholder="İcraçının gördüyü işi izah et." onChange={event => onUpdate(step.id, { description: event.target.value })}/></label>
+        <StepMetadataFields key={step.id} step={step} labelPrefix="Diaqram addımı" onChange={patch => onUpdate(step.id, patch)}/>
         <div className="inspector-step-actions">
           {onDuplicateStep && <button type="button" className="secondary-button" aria-label="Seçilmiş addımın surətini yarat" disabled={project.steps.length >= 200} onClick={() => onDuplicateStep(step.id)}><Copy size={15}/> Surətini yarat</button>}
           {step.position && <button type="button" className="text-button" onClick={() => onUpdate(step.id, { position: undefined })}><RotateCcw size={14}/> Bu fiquru avtomatik yerləşdir</button>}
