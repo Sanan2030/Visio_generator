@@ -29,16 +29,18 @@ Oxun xəttinə basmaq onu seçir və hər iki ucunda dairə tutacağı göstəri
 - İstifadəçinin verdiyi “Müştəri müraciətləri” nümunəsi: operator, vizaçı, aidiyyəti şəxslər, icraçılar, imtina/düzəliş dövrü, paralel ünvanlanma və QNV statusları. İmzalama nümunədə Vizaçı lane-indədir; ayrıca rol əlavə edib dəyişmək olar.
 - Visio-da ayrı-ayrı seçilib redaktə olunan fiqurlarla **.vsdx** ixracı və izah üçün redaktə olunan **.docx** Word cədvəli.
 - Fiqurların sürüklənməsi, diaqramdan ad/növ/icraçı/təsvir redaktəsi, keçid yaratmaq və silmək, uzun keçid izahları və ortaq qol nömrələri.
-- Hesabsız istifadə, brauzerdə dərhal avtomatik yadda saxlama, son 30 dəyişikliyi geri alma və yenidən tətbiq etmə və təsdiqli **Hər şeyi sil**.
+- Hesabsız istifadə, brauzerdə avtomatik yadda saxlama, son 30 dəyişikliyi geri alma və yenidən tətbiq etmə və təsdiqli **Hər şeyi sil**.
 - Dar ekranlarda formanın altında ayrıca sürüşdürülən diaqram; tam ekran rejimi ilə axına geniş baxış.
 
 ## Yadda saxlama
 
-Layihə məlumatı serverə göndərilmir. Hər dəyişiklik həmin anda `localStorage`-da `visioflow:v1:<id>` açarı ilə saxlanılır; URL-dəki `#<id>` həmin brauzerdə onu bərpa edir. Səhifəni yeniləyəndə, bağlayıb eyni ünvanı açanda və ya əvvəlki versiyada yaratdığın layihənin hash ünvanına keçəndə işinə davam edə bilərsən. Hash silindikdə yeni boş layihə yaranır.
+Layihə məlumatı serverə göndərilmir. Dəyişikliklər 300 ms fasilədən sonra `localStorage`-da `visioflow:v1:<id>` açarı ilə saxlanılır; səhifədən çıxanda və layihə dəyişəndə gözləyən yazma dərhal tamamlanır. URL-dəki `#<id>` həmin brauzerdə onu bərpa edir. Səhifəni yeniləyəndə, bağlayıb eyni ünvanı açanda və ya əvvəlki versiyada yaratdığın layihənin hash ünvanına keçəndə işinə davam edə bilərsən. Hash silindikdə yeni boş layihə yaranır.
 
 Hash layihənin identifikatorudur; məlumatın özü brauzerdə qalır. Eyni link başqa cihazda və ya başqa sayt domenində məlumatı bərpa etmir. Brauzerin sayt məlumatları təmizlənəndə saxlanmış layihələr də silinir. İnterfeysdə JSON yükləmə və açma yoxdur.
 
-Yuxarıdakı **Saxlanılıb** statusu uğurlu yadda saxlama deməkdir. Brauzer yerli yaddaşı bloklayarsa və ya yaddaş dolarsa **Yaddaş əlçatan deyil** göstərilir; cari dəyişikliklər açıq səhifədə qalır. Yeni diaqram və ya nümunə açmaq istəyəndə saxlanılmamış işin itirilməsinə qarşı təsdiq tələb olunur. Saxlanılmamış dəyişikliklər olduqda səhifədən çıxış üçün brauzer xəbərdarlığı da verilir.
+Boş, dəyişdirilməmiş layihə brauzer yaddaşına yazılmır; əvvəlki boş layihə açarları açılışda səssizcə təmizlənir. Məzmunlu layihələr saxlanılır. Eyni mətn sahəsində 600 ms daxilində ardıcıl dəyişikliklər bir tarixçə girişinə birləşdirilir.
+
+Yuxarıdakı **Saxlanılır…** statusu gözləyən yazmanı, **Saxlanılıb** isə uğurlu yazmanı və ya dəyişdirilməmiş boş formanı göstərir. Brauzer yerli yaddaşı bloklayarsa və ya yaddaş dolarsa **Yaddaş əlçatan deyil** göstərilir; cari dəyişikliklər açıq səhifədə qalır. Yeni diaqram və ya nümunə açmaq istəyəndə saxlanılmamış işin itirilməsinə qarşı təsdiq tələb olunur. Saxlanılmamış dəyişikliklər olduqda səhifədən çıxış üçün brauzer xəbərdarlığı da verilir.
 
 **Layihə menyusu → Hər şeyi sil** təsdiqdən sonra yalnız bu alətin yerli layihə açarlarını silir. Yeni diaqram və ya nümunə açmaq əvvəlki saxlanmış layihəni öz hash ünvanında saxlayır. Silmə uğursuz olarsa hazırkı layihə açıq qalır.
 
@@ -107,4 +109,4 @@ VSDX native fiqurlar, Unicode mətn və əlaqəli birləşdiricilərdən ibarət
 
 **Sloth AI hazırda qoşulmayıb.** İstifadə yeri və API müqaviləsi dəqiqləşəndən sonra inteqrasiya ayrıca əlavə edilə bilər. Hazırkı izah xarici AI çağırışı etmədən, formaya daxil edilən məlumatlardan qaydalar əsasında hazırlanır.
 
-Bir layihədə maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element mümkündür. Natamam addımlar da avtomatik saxlanılır; Visio faylını yükləmək üçün struktur xətaları düzəldilməlidir. Brauzerin yerli yaddaş tutumu ayrıca məhdudiyyət yaradır. Fiquru lane-lər və pool-lar arasında sürükləmək, həmçinin redaktə panelində icraçısını seçmək mümkündür. Pool-lar arasında keçid yaradıldıqda mesaj axını avtomatik göstərilir. Pool/lane ölçüləri avtomatik hesablanır, onların sərbəst sürüklənməsi və fiqurların ölçüsünü əl ilə dəyişmək bu versiyaya daxil deyil.
+Bir layihədə maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element mümkündür. Natamam addımlar da avtomatik saxlanılır; Visio faylını yükləmək üçün struktur xətaları düzəldilməlidir. Yeni yazmalar üçün layihə həddi 2 MB UTF-8-dir; bu, adətən 5 MiB olan localStorage tutumu üçün ehtiyatlı həddir. Saytda qalan ümumi yer ayrıca yoxlanılır və yaddaş dolarsa aydın bildiriş göstərilir. Əvvəlki böyük layihələr açılır, amma həddi aşan yeni yazma mövcud saxlanmış nüsxəni əvəz etmir. Fiquru lane-lər və pool-lar arasında sürükləmək, həmçinin redaktə panelində icraçısını seçmək mümkündür. Pool-lar arasında keçid yaradıldıqda mesaj axını avtomatik göstərilir. Pool/lane ölçüləri avtomatik hesablanır, onların sərbəst sürüklənməsi və fiqurların ölçüsünü əl ilə dəyişmək bu versiyaya daxil deyil.

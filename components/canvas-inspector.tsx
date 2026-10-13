@@ -11,7 +11,7 @@ interface InspectorProps {
   project: Project;
   stepId: string | null;
   routeSelection: DiagramRouteSelection | null;
-  onUpdate: (id: string, patch: Partial<Step>) => void;
+  onUpdate: (id: string, patch: Partial<Step>, historyKey?: string) => void;
   onDeleteStep: (id: string) => void;
   onDeleteRoute: (sourceId: string, routeIndex: number) => void;
   onReconnectRoute?: (selection: DiagramRouteSelection, endpoint: "source" | "target", nodeId: string) => boolean;
@@ -41,7 +41,9 @@ export default function CanvasInspector({ project, stepId, routeSelection, onUpd
 
   function updateRoute(patch: Partial<Step["routes"][number]>) {
     if (!routeSelection || !step) return;
-    onUpdate(step.id, { routes: step.routes.map((item, index) => index === routeSelection.routeIndex ? { ...item, ...patch } : item) });
+    const field = Object.keys(patch)[0];
+    onUpdate(step.id, { routes: step.routes.map((item, index) => index === routeSelection.routeIndex ? { ...item, ...patch } : item) },
+      ["label", "description"].includes(field) ? `route:${step.id}:${routeSelection.routeIndex}:${field}` : undefined);
   }
 
   return <aside className="canvas-inspector" ref={panelRef} aria-label={routeSelection ? "Keçid redaktəsi" : "Addım redaktəsi"} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {

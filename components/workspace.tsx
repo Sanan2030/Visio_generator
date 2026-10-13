@@ -93,8 +93,14 @@ export default function Workspace() {
     return () => document.removeEventListener("keydown", close);
   }, [menuOpen]);
 
-  function updateStep(id: string, patch: Partial<Step>) {
-    update(current => ({ ...current, steps: current.steps.map(step => step.id === id ? { ...step, ...patch } : step) }));
+  function updateStep(id: string, patch: Partial<Step>, historyKey?: string) {
+    const fields = Object.keys(patch);
+    const textField = fields.length === 1 && ["title", "description", "duration", "system", "document"].includes(fields[0]);
+    update(current => {
+      const existing = current.steps.find(step => step.id === id);
+      if (!existing || fields.every(field => Object.is(existing[field as keyof Step], patch[field as keyof Step]))) return current;
+      return { ...current, steps: current.steps.map(step => step.id === id ? { ...step, ...patch } : step) };
+    }, historyKey ?? (textField ? `step:${id}:${fields[0]}` : undefined));
   }
 
   function selectStep(id: string) {
@@ -344,13 +350,13 @@ export default function Workspace() {
         <div className="form-scroll" ref={formScroll}>
           {tab === "people" && <div className="people-form">
             <div className="form-intro"><span className="section-label">01 — İŞTİRAKÇILAR</span><h1>Prosesini qur.</h1><p>Prosesi adlandır, iştirakçıları əlavə et. Axının sağda yaransın.</p></div>
-            <label className="field-label">Prosesin adı<input aria-label="Prosesin adı" placeholder="Məsələn, Sənədin təsdiqi" maxLength={160} value={project.name} onChange={event=>update(current=>({...current,name:event.target.value}))}/></label>
+            <label className="field-label">Prosesin adı<input aria-label="Prosesin adı" placeholder="Məsələn, Sənədin təsdiqi" maxLength={160} value={project.name} onChange={event=>update(current=>({...current,name:event.target.value}), `project:${project.id}:name`)}/></label>
             <div className="pool-count"><div><strong>Neçə pool olacaq?</strong><p>Hər pool bir təşkilat və ya tərəfdir.</p></div><div className="number-control"><button type="button" aria-label="Pool sayını azalt" disabled={project.pools.length<=1} onClick={()=>setPoolCount(project.pools.length-1)}>−</button><input aria-label="Pool sayı" type="number" min={1} max={8} value={project.pools.length} onChange={event=>setPoolCount(Number(event.target.value))}/><button type="button" aria-label="Pool sayını artır" disabled={project.pools.length>=8} onClick={()=>setPoolCount(project.pools.length+1)}>+</button></div></div>
             {project.pools.map((pool,index) => <fieldset className="pool-card" key={pool.id}>
               <legend className="pool-heading"><Layers3 size={14}/> Pool {index+1}</legend>
-              <label className="field-label">Təşkilatın adı<input aria-label={`Pool ${index+1} adı`} placeholder="Təşkilat və ya tərəfin adı" maxLength={160} value={pool.name} onChange={event=>update(current=>({...current,pools:current.pools.map(item=>item.id===pool.id?{...item,name:event.target.value}:item)}))}/></label>
+              <label className="field-label">Təşkilatın adı<input aria-label={`Pool ${index+1} adı`} placeholder="Təşkilat və ya tərəfin adı" maxLength={160} value={pool.name} onChange={event=>update(current=>({...current,pools:current.pools.map(item=>item.id===pool.id?{...item,name:event.target.value}:item)}), `pool:${pool.id}:name`)}/></label>
               <div className="field-caption">İcraçılar <span>Lane-lər</span></div>
-              {pool.lanes.map((lane,laneIndex) => <div className="lane-input-row" key={lane.id}><span className="lane-dot"/><input aria-label={`Pool ${index+1} icraçı ${laneIndex+1}`} placeholder="Məsələn, Operator" maxLength={160} value={lane.name} onChange={event=>update(current=>({...current,pools:current.pools.map(item=>item.id===pool.id?{...item,lanes:item.lanes.map(role=>role.id===lane.id?{...role,name:event.target.value}:role)}:item)}))}/><button type="button" className="icon-button small-icon" aria-label={`${lane.name} icraçısını sil`} disabled={pool.lanes.length<=1} onClick={()=>deleteLane(pool.id,lane.id)}><X size={15}/></button></div>)}
+              {pool.lanes.map((lane,laneIndex) => <div className="lane-input-row" key={lane.id}><span className="lane-dot"/><input aria-label={`Pool ${index+1} icraçı ${laneIndex+1}`} placeholder="Məsələn, Operator" maxLength={160} value={lane.name} onChange={event=>update(current=>({...current,pools:current.pools.map(item=>item.id===pool.id?{...item,lanes:item.lanes.map(role=>role.id===lane.id?{...role,name:event.target.value}:role)}:item)}), `lane:${lane.id}:name`)}/><button type="button" className="icon-button small-icon" aria-label={`${lane.name} icraçısını sil`} disabled={pool.lanes.length<=1} onClick={()=>deleteLane(pool.id,lane.id)}><X size={15}/></button></div>)}
               <button type="button" className="text-button" disabled={pool.lanes.length>=20} onClick={()=>update(current=>({...current,pools:current.pools.map(item=>item.id===pool.id?{...item,lanes:[...item.lanes,{id:createId(),name:"Yeni icraçı"}]}:item)}))}><Plus size={14}/> İcraçı əlavə et</button>
             </fieldset>)}
             <p className="form-note">Eyni təşkilatın rollarını bir pool daxilində saxla.</p>

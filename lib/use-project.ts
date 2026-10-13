@@ -2,25 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createProject } from "./process";
-import { MAX_STORED_SIZE, parseProject, STORAGE_PREFIX } from "./storage";
+import { HISTORY_LIMIT, recordHistory, type HistoryGroup } from "./project-history";
+import { cleanupEmptyProjects, hasProjectContent, MAX_FILE_SIZE, parseProject, persistProject, STORAGE_PREFIX } from "./storage";
 import type { Project } from "./types";
 
 export type SaveState = "saving" | "saved" | "unavailable";
 
-function hasContent(project: Project): boolean {
-  return project.steps.length > 0
-    || project.name !== "Yeni iş axını"
-    || project.pools.length !== 1
-    || project.pools[0].name !== "Təşkilat"
-    || project.pools[0].lanes.length !== 1
-    || project.pools[0].lanes[0].name !== "İştirakçı 1";
-}
+const SAVE_DELAY = 300;
 
 function setHash(id: string) {
   window.history.replaceState(window.history.state, "", `#${id}`);
 }
 
-/** Persist before an editing event returns so an immediate refresh is safe. */
+/** Editing stays synchronous; storage writes are batched and flushed on navigation. */
 export function useProject() {
   const [project, setProject] = useState<Project>(() => createProject());
   const [ready, setReady] = useState(false);
@@ -32,33 +26,68 @@ export function useProject() {
   const current = useRef(project);
   const isReady = useRef(false);
   const history = useRef<Project[]>([]);
+  const historyGroup = useRef<HistoryGroup | null>(null);
   const future = useRef<Project[]>([]);
   const dirty = useRef(false);
   const savedSnapshot = useRef<string | null>(null);
   const pending = useRef<Project | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelSave = useCallback(() => {
+    if (saveTimer.current !== null) clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+  }, []);
 
   const persist = useCallback((next: Project, protectOnFailure: boolean): boolean => {
-    setSaveState("saving");
+    cancelSave();
     const serialized = JSON.stringify(next);
-    try {
-      localStorage.setItem(STORAGE_PREFIX + next.id, serialized);
-      savedSnapshot.current = serialized;
+    // An untouched empty workspace has no storage record. Undoing back to
+    // empty, however, must remove the earlier record so reload stays empty.
+    if ((!hasProjectContent(next) && savedSnapshot.current === null) || serialized === savedSnapshot.current) {
       dirty.current = false;
       setSaveState("saved");
       return true;
-    } catch {
+    }
+    setSaveState("saving");
+    try {
+      const written = persistProject(localStorage, next);
+      savedSnapshot.current = hasProjectContent(next) ? written : null;
+      dirty.current = false;
+      setSaveState("saved");
+      return true;
+    } catch (error) {
       // Restoring an already saved snapshot or a untouched blank workspace
       // should not prompt on unload just because a new storage write failed.
       dirty.current = protectOnFailure && serialized !== savedSnapshot.current;
       setSaveState("unavailable");
+      setNotice(error instanceof Error ? error.message : "Brauzer yaddaşına yazmaq mümkün olmadı. Son dəyişikliklər yalnız açıq səhifədədir.");
       return false;
     }
-  }, []);
+  }, [cancelSave]);
+
+  const scheduleSave = useCallback((next: Project) => {
+    cancelSave();
+    const serialized = JSON.stringify(next);
+    dirty.current = serialized !== savedSnapshot.current && (hasProjectContent(next) || savedSnapshot.current !== null);
+    if (!dirty.current) {
+      setSaveState("saved");
+      return;
+    }
+    setSaveState("saving");
+    saveTimer.current = setTimeout(() => persist(current.current, true), SAVE_DELAY);
+  }, [cancelSave, persist]);
+
+  const flush = useCallback(() => {
+    cancelSave();
+    return !dirty.current || persist(current.current, true);
+  }, [cancelSave, persist]);
 
   const storedSnapshot = useCallback((id: string): { project: Project; serialized: string } | null => {
     const stored = localStorage.getItem(STORAGE_PREFIX + id);
     if (!stored) return null;
-    const restored = parseProject(stored, MAX_STORED_SIZE);
+    // Earlier versions permitted larger drafts. Keep those readable while
+    // applying the conservative storage limit only to future writes.
+    const restored = parseProject(stored, MAX_FILE_SIZE);
     if (restored.id !== id) return null;
     return { project: restored, serialized: JSON.stringify(restored) };
   }, []);
@@ -69,17 +98,19 @@ export function useProject() {
   }, []);
 
   const apply = useCallback((next: Project, restoredSnapshot: string | null = null) => {
+    cancelSave();
     current.current = next;
     savedSnapshot.current = restoredSnapshot;
     history.current = [];
+    historyGroup.current = null;
     future.current = [];
     setUndoCount(0);
     setRedoCount(0);
     cancelReplacement();
     setProject(next);
     setHash(next.id);
-    persist(next, hasContent(next));
-  }, [cancelReplacement, persist]);
+    persist(next, hasProjectContent(next));
+  }, [cancelReplacement, cancelSave, persist]);
 
   useEffect(() => {
     function restore() {
@@ -92,17 +123,29 @@ export function useProject() {
           setNotice("Saxlanmış layihə oxunmadı. Brauzerin yerli yaddaşının əlçatan olduğunu yoxla.");
         }
       }
+      const next = restored?.project ?? createProject();
+      // Blank workspaces need no stored record, but their hash stays stable
+      // across reload. Clearing the hash still gives a fresh project ID.
+      if (!restored && /^[a-zA-Z0-9_-]{1,128}$/.test(id)) next.id = id;
+      if (isReady.current && !flush()) {
+        pending.current = next;
+        setUnsavedReplacement(true);
+        setHash(current.current.id);
+        return;
+      }
       // Clearing the hash intentionally starts a fresh workspace. Existing
       // project keys remain available at their original hash addresses.
-      apply(restored?.project ?? createProject(), restored?.serialized ?? null);
+      apply(next, restored?.serialized ?? null);
       isReady.current = true;
       setReady(true);
     }
     function warnBeforeUnload(event: BeforeUnloadEvent) {
+      flush();
       if (!dirty.current) return;
       event.preventDefault();
       event.returnValue = "";
     }
+    try { cleanupEmptyProjects(localStorage); } catch { /* Opening an empty workspace remains possible. */ }
     restore();
     window.addEventListener("hashchange", restore);
     // The ref is checked synchronously, including the same event turn in
@@ -111,8 +154,9 @@ export function useProject() {
     return () => {
       window.removeEventListener("hashchange", restore);
       window.removeEventListener("beforeunload", warnBeforeUnload);
+      flush();
     };
-  }, [apply, storedSnapshot]);
+  }, [apply, flush, storedSnapshot]);
 
   useEffect(() => {
     if (!notice) return;
@@ -120,48 +164,53 @@ export function useProject() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const update = useCallback((change: (previous: Project) => Project) => {
+  const update = useCallback((change: (previous: Project) => Project, historyKey?: string) => {
     if (!isReady.current) return;
     const previous = current.current;
     const next = change(previous);
     if (next === previous) return;
-    history.current = [...history.current.slice(-29), previous];
+    const recorded = recordHistory(history.current, previous, historyGroup.current, historyKey, Date.now());
+    history.current = recorded.snapshots;
+    historyGroup.current = recorded.group;
     future.current = [];
     setUndoCount(history.current.length);
     setRedoCount(0);
     current.current = next;
     setProject(next);
     setHash(next.id);
-    persist(next, true);
-  }, [persist]);
+    scheduleSave(next);
+  }, [scheduleSave]);
 
   const undo = useCallback(() => {
+    historyGroup.current = null;
     const previous = history.current.pop();
     if (!previous) return;
-    future.current = [...future.current.slice(-29), current.current];
+    future.current = [...future.current.slice(-(HISTORY_LIMIT - 1)), current.current];
     setUndoCount(history.current.length);
     setRedoCount(future.current.length);
     current.current = previous;
     setProject(previous);
     setHash(previous.id);
-    persist(previous, true);
-  }, [persist]);
+    scheduleSave(previous);
+  }, [scheduleSave]);
 
   const redo = useCallback(() => {
+    historyGroup.current = null;
     const next = future.current.pop();
     if (!next) return;
-    history.current = [...history.current.slice(-29), current.current];
+    history.current = [...history.current.slice(-(HISTORY_LIMIT - 1)), current.current];
     setUndoCount(history.current.length);
     setRedoCount(future.current.length);
     current.current = next;
     setProject(next);
     setHash(next.id);
-    persist(next, true);
-  }, [persist]);
+    scheduleSave(next);
+  }, [scheduleSave]);
 
   const replace = useCallback((next: Project): boolean => {
     if (!isReady.current) return false;
-    if (dirty.current && !persist(current.current, true)) {
+    historyGroup.current = null;
+    if (!flush()) {
       pending.current = next;
       setUnsavedReplacement(true);
       return false;
@@ -170,7 +219,7 @@ export function useProject() {
     try { snapshot = storedSnapshot(next.id)?.serialized ?? null; } catch { /* The next write reports availability. */ }
     apply(next, snapshot);
     return true;
-  }, [apply, persist, storedSnapshot]);
+  }, [apply, flush, storedSnapshot]);
 
   const confirmReplacement = useCallback(() => {
     const next = pending.current;
@@ -182,6 +231,8 @@ export function useProject() {
 
   const reset = useCallback((): boolean => {
     if (!isReady.current) return false;
+    cancelSave();
+    historyGroup.current = null;
     let removedCurrent = false;
     try {
       const keys = Object.keys(localStorage).filter((key) => key.startsWith(STORAGE_PREFIX));
@@ -199,7 +250,7 @@ export function useProject() {
     }
     apply(createProject());
     return true;
-  }, [apply, persist]);
+  }, [apply, cancelSave, persist]);
 
   return {
     project,

@@ -105,7 +105,7 @@ test("reset removes only app drafts and preserves unrelated browser storage", as
     drafts: Object.keys(localStorage).filter(key => key.startsWith("visioflow:v1:")),
   }));
   expect(storage.other).toBe("keep");
-  expect(storage.drafts).toHaveLength(1);
+  expect(storage.drafts).toHaveLength(0);
   await page.reload();
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Yeni iş axını");
 });
@@ -113,6 +113,7 @@ test("reset removes only app drafts and preserves unrelated browser storage", as
 test("failed reset preserves the current draft, hash and saved content", async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel("Prosesin adı", { exact: true }).fill("Silinməyən layihə");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
   const originalUrl = page.url();
   await page.evaluate(() => { Storage.prototype.removeItem = () => { throw new DOMException("Blocked", "SecurityError"); }; });
   await openReset(page);
@@ -127,6 +128,7 @@ test("failed reset preserves the current draft, hash and saved content", async (
 test("failed reset and writes do not warn on unload when the saved snapshot still exists", async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel("Prosesin adı", { exact: true }).fill("Yaddaşda qalan layihə");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
   await page.evaluate(() => {
     Storage.prototype.removeItem = () => { throw new DOMException("Blocked", "SecurityError"); };
     Storage.prototype.setItem = () => { throw new DOMException("Blocked", "SecurityError"); };
@@ -186,6 +188,9 @@ test("a storage retry saves the current draft before switching once storage beco
 test("undoing a failed save back to the stored snapshot clears the unload warning", async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel("Prosesin adı", { exact: true }).fill("Əvvəl saxlanılmış iş");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
+  // This second edit is intentionally a separate typing session.
+  await page.waitForTimeout(650);
   await page.evaluate(() => {
     Storage.prototype.setItem = () => { throw new DOMException("Storage full", "QuotaExceededError"); };
   });
@@ -193,7 +198,7 @@ test("undoing a failed save back to the stored snapshot clears the unload warnin
   expect(await unloadIsBlocked(page)).toBe(true);
   await page.getByRole("button", { name: "Son dəyişikliyi geri al", exact: true }).click();
   await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Əvvəl saxlanılmış iş");
-  await expect(page.locator(".save-status")).toHaveText("Yaddaş əlçatan deyil");
+  await expect(page.locator(".save-status")).toHaveText("Saxlanılıb");
   expect(await unloadIsBlocked(page)).toBe(false);
 });
 
@@ -216,14 +221,18 @@ test("a real unload warning can cancel refresh when edits could not be saved", a
 
 test("undo is limited to thirty snapshots and the undo result survives reload", async ({ page }) => {
   await openWorkspace(page);
-  const name = page.getByLabel("Prosesin adı", { exact: true });
-  for (let index = 1; index <= 35; index++) await name.fill(`Dəyişiklik ${index}`);
+  // Structural changes stay distinct even when they happen faster than the
+  // text coalescing interval. Undo stops at the fifth structural change.
+  for (let index = 0; index < 35; index++) {
+    const count = page.getByLabel("Pool sayı", { exact: true });
+    await count.fill(index % 2 === 0 ? "2" : "1");
+  }
   const undo = page.getByRole("button", { name: "Son dəyişikliyi geri al", exact: true });
   for (let index = 0; index < 30; index++) await undo.click();
-  await expect(name).toHaveValue("Dəyişiklik 5");
+  await expect(page.getByLabel("Pool sayı", { exact: true })).toHaveValue("2");
   await expect(undo).toBeDisabled();
   await page.reload();
-  await expect(page.getByLabel("Prosesin adı", { exact: true })).toHaveValue("Dəyişiklik 5");
+  await expect(page.getByLabel("Pool sayı", { exact: true })).toHaveValue("2");
   await expect(undo).toBeDisabled();
   expect(await unloadIsBlocked(page)).toBe(false);
 });

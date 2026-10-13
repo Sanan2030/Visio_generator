@@ -172,9 +172,10 @@ test("clearing the hash starts a blank project and reset requires confirmation",
   const original = await savedProject(page);
   await page.evaluate(() => { localStorage.setItem("unrelated-app-data", "preserve-me"); window.location.hash = ""; });
   await expect(page.getByLabel("Prosesin adı")).toHaveValue("Yeni iş axını");
-  const blank = await savedProject(page);
-  expect(blank.id).not.toBe(original.id);
-  expect(blank.steps).toHaveLength(0);
+  const blankId = new URL(page.url()).hash.slice(1);
+  expect(blankId).not.toBe(original.id);
+  await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(0);
+  expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_PREFIX + blankId)).toBeNull();
   await page.evaluate((id) => { window.location.hash = id; }, original.id);
   await expect(page.getByLabel("Prosesin adı")).toHaveValue(original.name);
   await resetDialog(page);
@@ -185,14 +186,13 @@ test("clearing the hash starts a blank project and reset requires confirmation",
   await resetDialog(page);
   await page.getByRole("button", { name: "Bəli, hər şeyi sil", exact: true }).click();
   await expect(page.getByLabel("Prosesin adı")).toHaveValue("Yeni iş axını");
-  const after = await savedProject(page);
   const storage = await page.evaluate((prefix) => ({
     keys: Object.keys(localStorage).filter((key) => key.startsWith(prefix)),
     unrelated: localStorage.getItem("unrelated-app-data"),
   }), STORAGE_PREFIX);
-  expect(storage.keys).toEqual([STORAGE_PREFIX + after.id]);
+  expect(storage.keys).toEqual([]);
   expect(storage.unrelated).toBe("preserve-me");
-  expect(after.steps).toHaveLength(0);
+  await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(0);
 });
 
 test("the example downloads editable native Visio shapes and the process explanation", async ({ page }) => {
