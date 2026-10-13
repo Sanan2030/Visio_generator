@@ -81,7 +81,7 @@ function longProject(count = 200): Project {
   };
 }
 
-test("the light workspace presents a white form beside a full-height paper canvas without JSON controls", async ({ page }, testInfo) => {
+test("the workspace presents a readable dark form beside a full-height white diagram without JSON controls", async ({ page }, testInfo) => {
   await openWorkspace(page);
   await expect(page.getByRole("navigation", { name: "Proses forması" }).getByRole("button")).toHaveCount(3);
   await expect(page.locator("input[type='file']")).toHaveCount(0);
@@ -93,8 +93,33 @@ test("the light workspace presents a white form beside a full-height paper canva
   expect(canvas!.width).toBeGreaterThan(form!.width);
   expect(form!.width).toBeCloseTo(400, 0);
   expect(canvas!.height).toBeGreaterThan(650);
-  await expect(page.locator(".form-panel")).toHaveCSS("background-color", "rgb(255, 255, 255)");
-  await expect(page.locator(".diagram-viewport")).toHaveCSS("background-color", "rgb(238, 241, 244)");
+  const colors = await page.locator(".form-panel").evaluate((panel) => {
+    const luminance = (color: string) => {
+      const components = color.match(/[\d.]+/g)?.slice(0, 3).map((component) => {
+        const channel = Number(component) / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      if (!components || components.length !== 3) throw new Error(`Unsupported computed color: ${color}`);
+      return components[0] * 0.2126 + components[1] * 0.7152 + components[2] * 0.0722;
+    };
+    const contrast = (foreground: string, background: string) => {
+      const lightness = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+      return (lightness[0] + 0.05) / (lightness[1] + 0.05);
+    };
+    const form = getComputedStyle(panel);
+    const input = getComputedStyle(panel.querySelector("input")!);
+    const canvas = getComputedStyle(document.querySelector(".diagram-viewport")!);
+    return {
+      formLuminance: luminance(form.backgroundColor),
+      canvasLuminance: luminance(canvas.backgroundColor),
+      formContrast: contrast(form.color, form.backgroundColor),
+      inputContrast: contrast(input.color, input.backgroundColor),
+    };
+  });
+  expect(colors.formLuminance).toBeLessThan(0.1);
+  expect(colors.canvasLuminance).toBeGreaterThan(0.95);
+  expect(colors.formContrast).toBeGreaterThanOrEqual(4.5);
+  expect(colors.inputContrast).toBeGreaterThanOrEqual(4.5);
   await expect(page.getByRole("button", { name: "Word izahını yüklə", exact: true })).toBeVisible();
   const preview = (await page.locator(".preview-panel").boundingBox())!;
   expect(preview.y + preview.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 1);
@@ -104,7 +129,7 @@ test("the light workspace presents a white form beside a full-height paper canva
   await page.keyboard.press("Escape");
   await expect(projectMenu).toHaveAttribute("aria-expanded", "false");
   await expect(projectMenu).toBeFocused();
-  await page.screenshot({ path: testInfo.outputPath("light-form-workspace.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("dark-form-white-diagram.png"), fullPage: true });
 });
 
 test("form editing builds a connected live flow and restores every field after reload", async ({ page }) => {

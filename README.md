@@ -1,6 +1,6 @@
 # VisioFlow
 
-Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevirən veb alət. Seçilmiş **D — İşıqlı iş masası** dizaynında ağ forma solda, nöqtəli diaqram sahəsi sağda yerləşir. Next.js və React ilə hazırlanıb; Vercel-də yerləşdirilə bilər.
+Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevirən veb alət. Seçilmiş iş masası yerləşməsində yumşaq qaranlıq forma solda, ağ fondakı nöqtəli diaqram sahəsi sağda yerləşir. Next.js və React ilə hazırlanıb; Vercel-də yerləşdirilə bilər.
 
 ## İş ardıcıllığı
 
@@ -80,7 +80,7 @@ Word sənədi ayrıca Office Open XML paketidir; həqiqi cədvəl, təkrarlanan 
 
 ## İnterfeys nümunələri
 
-Ana səhifədə **D — İşıqlı iş masası** dizaynı işləyir. [Yeni interfeysin görünüşü](public/design-previews/design-d.png).
+Ana səhifədə D iş masası yerləşməsi işləyir: başlıq və sol forma qaranlıq, sağdakı diaqram ağdır. Sahələr, fokus, seçim, xəta və uğur rəngləri hər fon üçün ayrıca seçilib. [Əvvəlki rəng variantının görünüşü](public/design-previews/design-d.png).
 
 Lokal inkişaf rejimində `/designs` səhifəsində üç qaranlıq interfeys variantına baxmaq olar: **A — Addım-addım forma**, **B — Diaqram mərkəzdə**, **C — Cədvəldən diaqrama**. Production-da bu səhifə 404 qaytarır və menyuda göstərilmir. Nümunələr görünüşü müqayisə etmək üçündür; səhifə mövcud layihəni dəyişmir. İşlək redaktor ana səhifədədir.
 
