@@ -200,6 +200,16 @@ h1, h2, h3, p { margin: 0; }
 .form-footer .add-step-button { width: 100%; min-height: 44px; border: 1px dashed #8a96a3; border-radius: 10px; background: transparent; color: var(--ink); }
 .form-footer .add-step-button:hover:not(:disabled) { background: var(--surface); }
 
+.form-step-toolbar { flex-shrink: 0; padding: 0 24px; border-bottom: 1px solid var(--line); }
+.flow-numbering-button { width: 100%; justify-content: flex-start; min-height: 40px; margin: 0; padding-left: 0; color: var(--accent); font-size: 12px; }
+.insert-after-button { justify-content: flex-start; width: 100%; min-height: 36px; margin-bottom: 12px; padding: 6px 0; color: var(--accent); font-size: 12px; }
+.template-options { display: flex; flex-direction: column; gap: 8px; margin: 0 0 18px; padding: 0; border: 0; }
+.template-options legend { margin-bottom: 10px; color: var(--muted); font-size: 12px; }
+.template-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.template-option.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.template-option input[type="radio"] { width: 16px; min-height: 16px; margin: 3px 0 0; padding: 0; flex-shrink: 0; accent-color: var(--accent); }
+.template-option strong { display: block; font-size: 13px; }
+.template-option small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .step-list { display: flex; flex-direction: column; gap: 8px; }
 .step-card { overflow: hidden; scroll-margin-block: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .step-card.selected, .step-card.active, .step-card.is-open { border-color: var(--accent); border-radius: 12px; box-shadow: 0 0 0 3px rgb(37 72 232 / 12%); }

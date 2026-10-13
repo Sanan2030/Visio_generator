@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, CircleHelp, FileText, GitBranch, Layers3, LoaderCircle, Plus, ShieldCheck, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, CircleHelp, FileText, GitBranch, Layers3, LoaderCircle, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import type { Step, StepType } from "@/lib/types";
 import { createId, createProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
 import { clampNodePosition } from "@/lib/layout";
 import { duplicateDiagramStep, moveDiagramStep, reconnectDiagramRoute } from "@/lib/diagram-edit";
 import { getRouteNumber } from "@/lib/step-numbering";
+import { insertStepAfter, moveStepInOrder, reorderStepsByFlow } from "@/lib/step-order";
+import { createProcessTemplate, PROCESS_TEMPLATES, type ProcessTemplateId } from "@/lib/templates";
 import { download, filename } from "@/lib/storage";
 import { useProject } from "@/lib/use-project";
 import Diagram, { type DiagramRouteSelection } from "./diagram";
@@ -33,6 +35,8 @@ export default function Workspace() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportingWord, setExportingWord] = useState(false);
+  const [exportingImage, setExportingImage] = useState<"svg" | "png" | null>(null);
+  const [templateId, setTemplateId] = useState<ProcessTemplateId | "customer">("customer");
   const formScroll = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -197,12 +201,13 @@ export default function Workspace() {
   }
 
   function openSample() {
-    if (project.steps.length) setModal("sample");
-    else sample();
+    setTemplateId("customer");
+    setModal("sample");
   }
 
   function sample() {
-    if (!replace({ ...structuredClone(SAMPLE_PROJECT), id: createId() })) return;
+    const next = templateId === "customer" ? { ...structuredClone(SAMPLE_PROJECT), id: createId() } : createProcessTemplate(templateId);
+    if (!replace(next)) return;
     setModal(null);
     setNotice("Nümunə açıldı. Məlumatları dəyişərək öz axınını qur.");
   }
@@ -264,6 +269,27 @@ export default function Workspace() {
     setTab("steps");
   }
 
+  function addAfter(id: string) {
+    const source = project.steps.find(step => step.id === id);
+    if (!source || project.steps.length >= 200) return;
+    const next: Step = { id: createId(), laneId: source.laneId, type: "task", title: "Yeni addım", description: "", routes: [] };
+    update(current => insertStepAfter(current, id, next));
+    selectStep(next.id);
+    setInspectorStep(null);
+    if (source.routes.length > 1) setNotice("Addım əlavə olundu. Hansı qola bağlanacağını keçidlərdə seç.");
+  }
+
+  function changeStepOrder(id: string, direction: "up" | "down") {
+    update(current => moveStepInOrder(current, id, direction));
+    selectStep(id);
+  }
+
+  function numberByFlow() {
+    clearEditorSelection();
+    update(reorderStepsByFlow);
+    setNotice("Addımlar başlanğıcdan axın ardıcıllığı üzrə nömrələndi. İzah və ixrac da bu sıranı izləyir.");
+  }
+
   function deleteStep(id: string) {
     const index = project.steps.findIndex(step => step.id === id);
     update(current => ({ ...current, steps: current.steps.filter(step => step.id !== id).map(step => ({ ...step, routes: step.routes.filter(route => route.targetId !== id) })) }));
@@ -305,6 +331,21 @@ export default function Workspace() {
     finally { setExportingWord(false); }
   }
 
+  async function exportImage(format: "svg" | "png") {
+    setMenuOpen(false);
+    const svg = document.getElementById("process-diagram") as SVGSVGElement | null;
+    if (!svg) { setNotice("Diaqram hələ hazır deyil."); return; }
+    const snapshot = svg.cloneNode(true) as SVGSVGElement;
+    setExportingImage(format);
+    try {
+      const { serializeDiagram, generateDiagramPng } = await import("@/lib/diagram-image");
+      const data = format === "svg" ? await serializeDiagram(snapshot, project) : await generateDiagramPng(snapshot, project);
+      download(data, `${filename(project.name)}.${format}`, format === "svg" ? "image/svg+xml" : "image/png");
+      setNotice(`${format.toUpperCase()} faylı hazırdır. Yükləmə başladıldı.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Diaqram şəklini hazırlamaq mümkün olmadı."); }
+    finally { setExportingImage(null); }
+  }
+
   return <div className="studio-shell">
     <header className="studio-header">
       <a className="brand" href="#" onClick={event => event.preventDefault()} aria-label="VisioFlow ana səhifə">
@@ -319,6 +360,8 @@ export default function Workspace() {
             <div className="project-menu" ref={projectMenuRef}>
               <button type="button" aria-label="Yeni diaqram" disabled={!ready} onClick={()=>{setMenuOpen(false);replace(createProject());}}><Plus size={16}/> Yeni diaqram</button>
               <button type="button" aria-label="Nümunə proses" disabled={!ready} onClick={()=>{setMenuOpen(false);openSample();}}><Layers3 size={16}/> Nümunə proses</button>
+              <button type="button" aria-label="SVG kimi yüklə" disabled={!ready || exportingImage!==null} onClick={()=>void exportImage("svg")}><ArrowDownToLine size={16}/> SVG kimi yüklə</button>
+              <button type="button" aria-label="PNG kimi yüklə" disabled={!ready || exportingImage!==null} onClick={()=>void exportImage("png")}><ArrowDownToLine size={16}/> PNG kimi yüklə</button>
               <button type="button" onClick={()=>{setMenuOpen(false);setModal("help");}}><CircleHelp size={16}/> Necə işləyir?</button>
               <a href="/designs"><Layers3 size={16}/> İnterfeys nümunələri</a>
               <button type="button" className="danger-menu-item" onClick={()=>{setMenuOpen(false);setModal("reset");}}><Trash2 size={16}/> Hər şeyi sil</button>
@@ -347,6 +390,7 @@ export default function Workspace() {
         <nav className="form-tabs" aria-label="Proses forması">
           {tabs.map(item => <button type="button" key={item.value} className={tab === item.value ? "active" : ""} aria-current={tab === item.value ? "step" : undefined} onClick={()=>setTab(item.value)}>{item.label}{item.value === "steps" && project.steps.length > 0 && <span className="tab-count">{project.steps.length}</span>}</button>)}
         </nav>
+        {tab === "steps" && !!project.steps.length && <div className="form-step-toolbar"><button type="button" className="text-button flow-numbering-button" aria-label="Axın ardıcıllığı üzrə nömrələ" disabled={!project.steps.some(step=>step.type==="start")} onClick={numberByFlow}><GitBranch size={14}/> Axın ardıcıllığı üzrə nömrələ</button></div>}
         <div className="form-scroll" ref={formScroll}>
           {tab === "people" && <div className="people-form">
             <div className="form-intro"><span className="section-label">01 — İŞTİRAKÇILAR</span><h1>Prosesini qur.</h1><p>Prosesi adlandır, iştirakçıları əlavə et. Axının sağda yaransın.</p></div>
@@ -380,9 +424,12 @@ export default function Workspace() {
                     }}>
                       <span className="step-number">{index+1}</span><span className="step-summary-text"><strong>{step.title||"Adsız addım"}</strong><small>{lane?.name||"İcraçı seçilməyib"} <span>·</span> {kind}</small></span><ChevronDown size={15} className="step-summary-chevron"/>
                     </button>
+                    <button type="button" className="icon-button small-icon" aria-label={`${index+1}-ci addımı yuxarı keçir`} title="Yuxarı keçir" disabled={index===0} onClick={()=>changeStepOrder(step.id,"up")}><ArrowUp size={14}/></button>
+                    <button type="button" className="icon-button small-icon" aria-label={`${index+1}-ci addımı aşağı keçir`} title="Aşağı keçir" disabled={index===project.steps.length-1} onClick={()=>changeStepOrder(step.id,"down")}><ArrowDown size={14}/></button>
                     <button type="button" className="icon-button small-icon danger-icon" aria-label={`${index+1}-ci addımı sil`} onClick={()=>deleteStep(step.id)}><Trash2 size={14}/></button>
                   </div>
                   {open && <div className="step-form" id={`step-fields-${step.id}`}>
+                    <button type="button" className="text-button insert-after-button" aria-label="Bu addımdan sonra əlavə et" disabled={project.steps.length>=200 || step.type==="end"} onClick={()=>addAfter(step.id)}><Plus size={14}/> Bu addımdan sonra əlavə et</button>
                     <label className="field-label">Addımın adı<input aria-label={`${index+1}-ci addımın adı`} placeholder="Bu addımda nə baş verir?" maxLength={240} value={step.title} onChange={event=>updateStep(step.id,{title:event.target.value})}/></label>
                     <div className="field-row">
                       <label className="field-label">Element növü<select aria-label={`${index+1}-ci addımın növü`} value={step.type} onChange={event=>updateStep(step.id,{type:event.target.value as StepType,routes:event.target.value==="end"?[]:step.routes})}>{STEP_TYPES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
@@ -447,7 +494,12 @@ export default function Workspace() {
       <span className={`modal-icon ${activeModal==="reset"||activeModal==="unsaved"?"red":""}`}>{activeModal==="reset"?<Trash2 size={24}/>:activeModal==="sample"?<Layers3 size={24}/>:<CircleHelp size={24}/>}</span>
       <h2 id="modal-title">{activeModal==="reset"?"Hər şeyi silmək istəyirsən?":activeModal==="sample"?"Nümunə prosesi açaq?":activeModal==="unsaved"?"Dəyişikliklər saxlanılmayıb":activeModal==="table"?"İş axınının izah cədvəli":"Formadan Visio diaqramına"}</h2>
       {activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru başqa iştirakçının sahəsinə sürüşdür: izahda icraçı da dəyişir. İki kliklə və ya Redaktə et düyməsi ilə paneli aç. Seçilmiş fiqurun + tutacağını digər fiqura apararaq yeni keçid yarat.</p><p><strong>3. Keçidə izah yaz.</strong> Xətti seçib ucundakı dairəni başqa fiqura sürüşdürərək oxun başlanğıcını və ya hədəfini dəyiş. Etiketə basıb qısa mətni və ətraflı izahı doldur. İcraçı, hədəf və qol nömrələri Word cədvəlində də yenilənir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
-        <p>{activeModal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri silinəcək. Bu əməliyyat geri qaytarılmır.":activeModal==="sample"?"Müştəri müraciətləri nümunəsi açılacaq. Saxlanmış layihən öz əvvəlki ünvanında qalacaq.":"Brauzer son dəyişiklikləri saxlaya bilmədi. Hazırkı işi açıq saxlaya və ya dəyişiklikləri itirməyi qəbul edib davam edə bilərsən."}</p>
+        {activeModal==="sample" && <fieldset className="template-options"><legend>Hazır proses seç</legend>
+          {[{id:"customer", name:"Müştəri müraciətləri", description:"Əvvəlki operator, vizaçı və icraçı nümunəsi."}, ...PROCESS_TEMPLATES].map(item=><label key={item.id} className={`template-option ${templateId===item.id ? "is-selected" : ""}`}>
+            <input type="radio" name="process-template" aria-label={item.name} checked={templateId===item.id} onChange={()=>setTemplateId(item.id as ProcessTemplateId|"customer")}/><span><strong>{item.name}</strong><small>{item.description}</small></span>
+          </label>)}
+        </fieldset>}
+        <p>{activeModal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri silinəcək. Bu əməliyyat geri qaytarılmır.":activeModal==="sample"?"Seçdiyin nümunə açılacaq. Saxlanmış layihən öz əvvəlki ünvanında qalacaq.":"Brauzer son dəyişiklikləri saxlaya bilmədi. Hazırkı işi açıq saxlaya və ya dəyişiklikləri itirməyi qəbul edib davam edə bilərsən."}</p>
         <div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Ləğv et</button><button type="button" className={activeModal==="sample"?"primary-button":"danger-button"} onClick={activeModal==="reset"?clearProjects:activeModal==="sample"?sample:()=>{confirmReplacement();setModal(null);}}>{activeModal==="reset"?"Bəli, hər şeyi sil":activeModal==="sample"?"Nümunəni aç":"Saxlamadan davam et"}</button></div>
       </>}
     </section></div>}
