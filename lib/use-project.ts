@@ -26,11 +26,13 @@ export function useProject() {
   const [ready, setReady] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saving");
   const [undoCount, setUndoCount] = useState(0);
+  const [redoCount, setRedoCount] = useState(0);
   const [unsavedReplacement, setUnsavedReplacement] = useState(false);
   const [notice, setNotice] = useState("");
   const current = useRef(project);
   const isReady = useRef(false);
   const history = useRef<Project[]>([]);
+  const future = useRef<Project[]>([]);
   const dirty = useRef(false);
   const savedSnapshot = useRef<string | null>(null);
   const pending = useRef<Project | null>(null);
@@ -70,7 +72,9 @@ export function useProject() {
     current.current = next;
     savedSnapshot.current = restoredSnapshot;
     history.current = [];
+    future.current = [];
     setUndoCount(0);
+    setRedoCount(0);
     cancelReplacement();
     setProject(next);
     setHash(next.id);
@@ -122,7 +126,9 @@ export function useProject() {
     const next = change(previous);
     if (next === previous) return;
     history.current = [...history.current.slice(-29), previous];
+    future.current = [];
     setUndoCount(history.current.length);
+    setRedoCount(0);
     current.current = next;
     setProject(next);
     setHash(next.id);
@@ -132,11 +138,25 @@ export function useProject() {
   const undo = useCallback(() => {
     const previous = history.current.pop();
     if (!previous) return;
+    future.current = [...future.current.slice(-29), current.current];
     setUndoCount(history.current.length);
+    setRedoCount(future.current.length);
     current.current = previous;
     setProject(previous);
     setHash(previous.id);
     persist(previous, true);
+  }, [persist]);
+
+  const redo = useCallback(() => {
+    const next = future.current.pop();
+    if (!next) return;
+    history.current = [...history.current.slice(-29), current.current];
+    setUndoCount(history.current.length);
+    setRedoCount(future.current.length);
+    current.current = next;
+    setProject(next);
+    setHash(next.id);
+    persist(next, true);
   }, [persist]);
 
   const replace = useCallback((next: Project): boolean => {
@@ -186,8 +206,10 @@ export function useProject() {
     ready,
     saveState,
     undoCount,
+    redoCount,
     update,
     undo,
+    redo,
     replace,
     reset,
     unsavedReplacement,

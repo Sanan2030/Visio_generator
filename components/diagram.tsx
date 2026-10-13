@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { Circle, Diamond, Expand, Minus, MousePointer2, Move, Pencil, Plus, RotateCcw, Scan, Shrink, Square, StickyNote, Undo2, Waypoints } from "lucide-react";
+import { Circle, Copy, Diamond, Expand, Minus, MousePointer2, Move, Pencil, Plus, Redo2, RotateCcw, Scan, Shrink, Square, StickyNote, Trash2, Undo2, Waypoints } from "lucide-react";
 import { clampNodePosition, layoutProject } from "@/lib/layout";
 import { displayRouteLabel, getStepNumber } from "@/lib/step-numbering";
-import type { LayoutPoint, Project, StepType } from "@/lib/types";
+import type { LayoutLane, LayoutPoint, Project, StepType } from "@/lib/types";
 
 export type DiagramRouteSelection = { sourceId: string; routeIndex: number };
 
@@ -13,23 +13,35 @@ type DiagramProps = {
   selectedId?: string | null;
   onSelect: (id: string) => void;
   selectedRoute?: DiagramRouteSelection | null;
-  onMoveStep?: (id: string, position: LayoutPoint) => void;
+  onMoveStep?: (id: string, position: LayoutPoint, laneId?: string) => void;
   onEditStep?: (id: string) => void;
   onSelectRoute?: (sourceId: string, routeIndex: number) => void;
   onEditRoute?: (sourceId: string, routeIndex: number) => void;
   onConnect?: (sourceId: string, targetId: string) => void;
   onResetLayout?: () => void;
   onDeleteStep?: (id: string) => void;
+  onReconnectRoute?: (selection: DiagramRouteSelection, endpoint: "source" | "target", nodeId: string) => boolean;
+  onDuplicateStep?: (id: string) => void;
+  onDeleteRoute?: (selection: DiagramRouteSelection) => void;
   onAddShape?: (type: StepType) => void;
   controlsDisabled?: boolean;
   onUndo?: () => void;
   canUndo?: boolean;
+  onRedo?: () => void;
+  canRedo?: boolean;
   children?: ReactNode;
 };
 
 type DragGesture = {
   kind: "node"; id: string; pointerId: number; start: LayoutPoint; origin: LayoutPoint;
-  clientX: number; clientY: number; maxY: number; position: LayoutPoint; moved: boolean;
+  clientX: number; clientY: number; position: LayoutPoint; moved: boolean;
+  originalLaneId: string; laneId: string | null; lanes: LayoutLane[]; width: number; height: number;
+  originalY: number;
+};
+type ReconnectChoice = { selection: DiagramRouteSelection; endpoint: "source" | "target" };
+type ReconnectGesture = ReconnectChoice & {
+  kind: "reconnect"; pointerId: number; clientX: number; clientY: number;
+  point: LayoutPoint; targetId: string | null; moved: boolean;
 };
 type ConnectGesture = {
   kind: "connect"; id: string; pointerId: number; clientX: number; clientY: number;
@@ -89,18 +101,36 @@ function routeLabelPosition(points: { x: number; y: number }[], branch = false) 
   return result;
 }
 
-export default function Diagram({ project, selectedId, selectedRoute, onSelect, onMoveStep, onEditStep, onSelectRoute, onEditRoute, onConnect, onResetLayout, onDeleteStep, onAddShape, controlsDisabled = false, onUndo, canUndo = false, children }: DiagramProps) {
-  const [draftPosition, setDraftPosition] = useState<{ id: string; position: LayoutPoint } | null>(null);
-  const draftProject = useMemo(() => draftPosition ? {
-    ...project, steps: project.steps.map((step) => step.id === draftPosition.id ? { ...step, position: draftPosition.position } : step),
-  } : project, [project, draftPosition]);
-  const layout = useMemo(() => layoutProject(draftProject), [draftProject]);
+export default function Diagram({ project, selectedId, selectedRoute, onSelect, onMoveStep, onEditStep, onSelectRoute, onEditRoute, onConnect, onResetLayout, onDeleteStep, onReconnectRoute, onDuplicateStep, onDeleteRoute, onAddShape, controlsDisabled = false, onUndo, canUndo = false, onRedo, canRedo = false, children }: DiagramProps) {
+  const [draftPosition, setDraftPosition] = useState<{ id: string; point: LayoutPoint; laneId: string | null } | null>(null);
+  const baseLayout = useMemo(() => layoutProject(project), [project]);
+  const layout = useMemo(() => {
+    if (!draftPosition) return baseLayout;
+    // Keep lane hit regions fixed while dragging. Re-running automatic layout at
+    // every pointer move can grow the original lane and prevent crossing it.
+    const original = baseLayout.nodes.find((node) => node.id === draftPosition.id);
+    if (!original) return baseLayout;
+    const moved = { ...original, ...draftPosition.point };
+    const dx = moved.x - original.x, dy = moved.y - original.y;
+    return {
+      ...baseLayout,
+      nodes: baseLayout.nodes.map((node) => node.id === moved.id ? moved : node),
+      edges: baseLayout.edges.map((edge) => {
+        if (edge.sourceId !== moved.id && edge.targetId !== moved.id) return edge;
+        const first = edge.points[0], last = edge.points[edge.points.length - 1];
+        const start = edge.sourceId === moved.id ? { x: first.x + dx, y: first.y + dy } : first;
+        const end = edge.targetId === moved.id ? { x: last.x + dx, y: last.y + dy } : last;
+        const channelX = start.x + 28;
+        return { ...edge, points: [start, { x: channelX, y: start.y }, { x: channelX, y: end.y }, end] };
+      }),
+    };
+  }, [baseLayout, draftPosition]);
   const stepById = useMemo(() => new Map(project.steps.map((step) => [step.id, step])), [project.steps]);
   const panel = useRef<HTMLDivElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const captureElement = useRef<SVGElement | HTMLDivElement | null>(null);
-  const gesture = useRef<DragGesture | ConnectGesture | null>(null);
+  const gesture = useRef<DragGesture | ConnectGesture | ReconnectGesture | null>(null);
   const suppressClick = useRef(false);
   const pan = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
   const previousProject = useRef(project.id);
@@ -116,6 +146,8 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [connection, setConnection] = useState<{ sourceId: string; point: LayoutPoint; targetId: string | null } | null>(null);
   const [connectionSource, setConnectionSource] = useState<string | null>(null);
+  const [reconnectChoice, setReconnectChoice] = useState<ReconnectChoice | null>(null);
+  const [reconnectPreview, setReconnectPreview] = useState<(ReconnectChoice & { point: LayoutPoint; targetId: string | null }) | null>(null);
   const [activeTool, setActiveTool] = useState<"select" | "pan" | "connect">("select");
   const [editNotice, setEditNotice] = useState("");
   const markerPrefix = useId().replace(/:/g, "");
@@ -133,6 +165,8 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     setDraggingId(null);
     setConnection(null);
     setConnectionSource(null);
+    setReconnectChoice(null);
+    setReconnectPreview(null);
     setActiveTool("select");
     fittedProject.current = project.id;
     setPanning(false);
@@ -143,7 +177,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   useEffect(() => {
     const handleFullscreen = () => setFullscreen(document.fullscreenElement === panel.current);
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { cancelGesture(); setConnectionSource(null); setActiveTool("select"); setExpanded(false); setFullscreenNotice(""); }
+      if (event.key === "Escape") { cancelGesture(); setConnectionSource(null); setReconnectChoice(null); setActiveTool("select"); setExpanded(false); setFullscreenNotice(""); }
     };
     document.addEventListener("fullscreenchange", handleFullscreen);
     document.addEventListener("keydown", handleEscape);
@@ -200,6 +234,14 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     const timeout = window.setTimeout(() => setEditNotice(""), 3500);
     return () => window.clearTimeout(timeout);
   }, [editNotice]);
+
+  useEffect(() => {
+    // A pending endpoint belongs to one exact route in one model snapshot.
+    // Selection changes, deletion and history must never retarget a stale route.
+    cancelGesture();
+    setReconnectChoice(null);
+    setConnectionSource(null);
+  }, [project.steps, selectedRoute?.sourceId, selectedRoute?.routeIndex]);
 
   useEffect(() => {
     const view = viewport.current;
@@ -265,11 +307,12 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     setDraftPosition(null);
     setDraggingId(null);
     setConnection(null);
+    setReconnectPreview(null);
     if (current) releasePointer(current.pointerId);
   }
 
   function beginNodeDrag(event: ReactPointerEvent<SVGGElement>, id: string) {
-    if (!event.isPrimary || event.button !== 0 || !onMoveStep || connectionSource || activeTool !== "select") return;
+    if (!event.isPrimary || event.button !== 0 || !onMoveStep || connectionSource || reconnectChoice || activeTool !== "select") return;
     const step = stepById.get(id);
     const node = layout.nodes.find((item) => item.id === id);
     const lane = layout.lanes.find((item) => item.id === step?.laneId);
@@ -281,7 +324,9 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     const origin = { x: node.x, y: node.y - lane.y };
     gesture.current = {
       kind: "node", id, pointerId: event.pointerId, start: point, origin,
-      clientX: event.clientX, clientY: event.clientY, maxY: Math.max(16, lane.height - node.height - 16), position: origin, moved: false,
+      clientX: event.clientX, clientY: event.clientY, position: origin, moved: false,
+      originalLaneId: lane.id, laneId: lane.id, lanes: baseLayout.lanes,
+      width: node.width, height: node.height, originalY: node.y,
     };
     capturePointer(event.pointerId, event.currentTarget);
   }
@@ -293,9 +338,33 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     event.preventDefault();
     event.stopPropagation();
     setConnectionSource(null);
+    setReconnectChoice(null);
     gesture.current = { kind: "connect", id, pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, point, targetId: null, moved: false };
     setConnection({ sourceId: id, point, targetId: null });
     capturePointer(event.pointerId, event.currentTarget);
+  }
+
+  function beginReconnect(event: ReactPointerEvent<SVGGElement>, selection: DiagramRouteSelection, endpoint: "source" | "target") {
+    if (!event.isPrimary || event.button !== 0 || !onReconnectRoute || activeTool === "pan") return;
+    const point = diagramPoint(event.clientX, event.clientY);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    cancelGesture();
+    setConnectionSource(null);
+    setActiveTool("select");
+    setReconnectChoice(null);
+    gesture.current = { kind: "reconnect", selection, endpoint, pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, point, targetId: null, moved: false };
+    setReconnectPreview({ selection, endpoint, point, targetId: null });
+    capturePointer(event.pointerId, event.currentTarget);
+  }
+
+  function reconnectToNode(choice: ReconnectChoice, id: string) {
+    const accepted = onReconnectRoute?.(choice.selection, choice.endpoint, id) ?? false;
+    setEditNotice(accepted ? "Keçidin ucu dəyişdirildi. Etiket və izah saxlanıldı." : "Bu fiqura birləşdirmək mümkün deyil. Keçid dəyişdirilmədi.");
+    setReconnectChoice(null);
+    setReconnectPreview(null);
+    setActiveTool("select");
   }
 
   function moveGesture(event: ReactPointerEvent<HTMLDivElement>) {
@@ -309,16 +378,21 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     }
     if (current.kind === "node") {
       if (!current.moved) return true;
-      current.position = clampNodePosition({
-        x: current.origin.x + point.x - current.start.x,
-        y: Math.min(current.maxY, current.origin.y + point.y - current.start.y),
-      });
+      const absolute = { x: current.origin.x + point.x - current.start.x, y: current.originalY + point.y - current.start.y };
+      const center = { x: absolute.x + current.width / 2, y: absolute.y + current.height / 2 };
+      const lane = current.lanes.find((item) => center.x >= item.x + 136 && center.x <= item.x + item.width && center.y >= item.y && center.y <= item.y + item.height);
+      current.laneId = lane?.id ?? null;
+      current.position = clampNodePosition({ x: absolute.x, y: lane ? Math.min(lane.height - current.height - 16, absolute.y - lane.y) : current.origin.y });
       setDraggingId(current.id);
-      setDraftPosition({ id: current.id, position: current.position });
-    } else {
+      setDraftPosition({ id: current.id, point: { x: current.position.x, y: lane ? lane.y + current.position.y : absolute.y }, laneId: current.laneId });
+    } else if (current.kind === "connect") {
       current.point = point;
       current.targetId = layout.nodes.find((node) => node.id !== current.id && point.x >= node.x && point.x <= node.x + node.width && point.y >= node.y && point.y <= node.y + node.height)?.id ?? null;
       setConnection({ sourceId: current.id, point, targetId: current.targetId });
+    } else {
+      current.point = point;
+      current.targetId = layout.nodes.find((node) => point.x >= node.x && point.x <= node.x + node.width && point.y >= node.y && point.y <= node.y + node.height)?.id ?? null;
+      setReconnectPreview({ selection: current.selection, endpoint: current.endpoint, point, targetId: current.targetId });
     }
     return true;
   }
@@ -331,11 +405,17 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     // A pointer release also dispatches click; consume it without hiding the next deliberate click.
     window.setTimeout(() => { suppressClick.current = false; }, 0);
     if (current.kind === "node") {
-      if (current.moved && (current.position.x !== current.origin.x || current.position.y !== current.origin.y)) {
-        onMoveStep?.(current.id, current.position);
-        setEditNotice("Addımın yeri saxlanıldı.");
+      if (current.moved && current.laneId && (current.laneId !== current.originalLaneId || current.position.x !== current.origin.x || current.position.y !== current.origin.y)) {
+        onMoveStep?.(current.id, current.position, current.laneId);
+        setEditNotice(current.laneId !== current.originalLaneId ? "Addım digər iştirakçıya keçirildi. İzahda icraçı yeniləndi." : "Addımın yeri saxlanıldı.");
+      } else if (current.moved && !current.laneId) {
+        setEditNotice("Addımı iştirakçı sahəsinə burax. Dəyişiklik ləğv edildi.");
       }
       onSelect(current.id);
+    } else if (current.kind === "reconnect") {
+      if (current.moved && current.targetId) reconnectToNode(current, current.targetId);
+      else if (!current.moved) setReconnectChoice({ selection: current.selection, endpoint: current.endpoint });
+      else setEditNotice("Keçidin ucunu fiqura burax. Keçid dəyişdirilmədi.");
     } else if (current.targetId) {
       onConnect?.(current.id, current.targetId);
       setConnectionSource(null);
@@ -346,6 +426,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     setDraftPosition(null);
     setDraggingId(null);
     setConnection(null);
+    setReconnectPreview(null);
     releasePointer(event.pointerId);
     return true;
   }
@@ -353,6 +434,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   function selectNode(id: string) {
     if (activeTool === "pan") return;
     if (suppressClick.current) { suppressClick.current = false; return; }
+    if (reconnectChoice) { reconnectToNode(reconnectChoice, id); return; }
     if (connectionSource && connectionSource !== id) {
       onConnect?.(connectionSource, id);
       setConnectionSource(null);
@@ -369,6 +451,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   function selectTool(tool: "select" | "pan" | "connect") {
     cancelGesture();
     setActiveTool(tool);
+    setReconnectChoice(null);
     setConnectionSource(tool === "connect" && selectedId && stepById.get(selectedId)?.type !== "end" ? selectedId : null);
   }
 
@@ -393,6 +476,29 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     });
     onMoveStep(id, position);
     return true;
+  }
+
+  function handleEditorShortcut(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const target = event.target as Element;
+    if (target.closest("input, textarea, select, [contenteditable='true']")) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "z") {
+      if (event.shiftKey ? onRedo && canRedo : onUndo && canUndo) {
+        event.preventDefault();
+        cancelGesture();
+        setReconnectChoice(null);
+        if (event.shiftKey) onRedo?.(); else onUndo?.();
+      }
+    } else if (modifier && event.key.toLowerCase() === "y" && onRedo && canRedo) {
+      event.preventDefault(); cancelGesture(); setReconnectChoice(null); onRedo();
+    } else if (modifier && event.key.toLowerCase() === "d" && onDuplicateStep && (selectedId || selectedRoute)) {
+      event.preventDefault();
+      if (selectedId && !selectedRoute && !controlsDisabled) onDuplicateStep(selectedId);
+      else if (selectedRoute) setEditNotice("Surətini yaratmaq üçün keçid deyil, fiqur seç.");
+    } else if (!modifier && (event.key === "Delete" || event.key === "Backspace") && event.target === viewport.current) {
+      if (selectedRoute && onDeleteRoute) { event.preventDefault(); onDeleteRoute(selectedRoute); }
+      else if (selectedId && onDeleteStep) { event.preventDefault(); onDeleteStep(selectedId); }
+    }
   }
 
   async function toggleFullscreen() {
@@ -422,10 +528,22 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     view.scrollTo({ left: 0, top: 0 });
   }
 
-  return <div ref={panel} className={`diagram-panel${expanded ? " diagram-fullscreen" : ""}${children ? " has-inspector" : ""}`}>
+  const selectedStep = selectedId ? stepById.get(selectedId) : undefined;
+  const selectedEdge = selectedRoute ? layout.edges.find((edge) => edge.sourceId === selectedRoute.sourceId && edge.routeIndex === selectedRoute.routeIndex) : undefined;
+  const dropLaneName = draftPosition?.laneId ? baseLayout.lanes.find((lane) => lane.id === draftPosition.laneId)?.name : null;
+  const canEditSelection = selectedRoute ? Boolean(onEditRoute) : Boolean(selectedStep && onEditStep);
+  function editSelection() {
+    cancelGesture();
+    setReconnectChoice(null);
+    if (selectedRoute) onEditRoute?.(selectedRoute.sourceId, selectedRoute.routeIndex);
+    else if (selectedId) onEditStep?.(selectedId);
+  }
+
+  return <div ref={panel} className={`diagram-panel${expanded ? " diagram-fullscreen" : ""}${children ? " has-inspector" : ""}`} onKeyDown={handleEditorShortcut}>
     <div className="diagram-toolbar">
       <div className="diagram-controls">
         {onUndo && <button type="button" className="diagram-control" aria-label="Son dəyişikliyi geri al" title="Geri al" onClick={onUndo} disabled={!canUndo}><Undo2 size={17} /></button>}
+        {onRedo && <button type="button" className="diagram-control" aria-label="Geri alınmış dəyişikliyi yenidən tətbiq et" title="Yenidən tətbiq et" onClick={onRedo} disabled={!canRedo}><Redo2 size={17} /></button>}
         {onResetLayout && <button type="button" className="diagram-control" aria-label="Diaqramı avtomatik düz" title="Avtomatik düz" onClick={onResetLayout} disabled={!project.steps.some((step) => step.position)}><RotateCcw size={15} /></button>}
         <button type="button" className="diagram-control" aria-label="Diaqramı kiçilt" title="Kiçilt" onClick={() => changeZoom(zoom - 0.1)} disabled={zoom <= MIN_MANUAL_ZOOM}><Minus size={15} /></button>
         <span className="diagram-zoom" aria-live="polite">{zoom < 0.1 ? Math.round(zoom * 1000) / 10 : Math.round(zoom * 100)}%</span>
@@ -435,10 +553,15 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
         <button type="button" className="diagram-control" aria-label={fullscreen || expanded ? "Tam ekrandan çıx" : "Diaqramı tam ekranda aç"} aria-pressed={fullscreen || expanded} title={fullscreen || expanded ? "Tam ekrandan çıx" : "Tam ekran"} onClick={() => void toggleFullscreen()}>{fullscreen || expanded ? <Shrink size={15} /> : <Expand size={15} />}</button>
       </div>
     </div>
+    {(selectedStep || selectedEdge) && <div className="diagram-selection-actions" role="toolbar" aria-label="Seçilmiş elementin əməliyyatları">
+      {canEditSelection && <button type="button" className="diagram-selection-action has-label" aria-label={selectedRoute ? "Seçilmiş keçidi redaktə et" : "Seçilmiş fiquru redaktə et"} title={selectedRoute ? "Keçidin etiketi, izahı və uclarını redaktə et" : "Addımın adı, icraçısı, növü və izahını redaktə et"} onClick={editSelection}><Pencil size={16} /><span>Redaktə et</span></button>}
+      {selectedStep && !selectedRoute && onDuplicateStep && <button type="button" className="diagram-selection-action" aria-label="Seçilmiş fiqurun surətini yarat" title="Surətini yarat · Ctrl+D" disabled={controlsDisabled} onClick={() => onDuplicateStep(selectedStep.id)}><Copy size={16} /><span>Surətini yarat</span></button>}
+      {(selectedRoute ? onDeleteRoute : selectedStep && onDeleteStep) && <button type="button" className="diagram-selection-action danger-icon" aria-label={selectedRoute ? "Diaqramda seçilmiş keçidi sil" : "Diaqramda seçilmiş fiquru sil"} title="Sil · Delete" onClick={() => { if (selectedRoute) onDeleteRoute?.(selectedRoute); else if (selectedStep) onDeleteStep?.(selectedStep.id); }}><Trash2 size={16} /><span>Sil</span></button>}
+    </div>}
     {fullscreenNotice && <div className="diagram-notice" role="status">{fullscreenNotice}</div>}
-    {(onMoveStep || onEditStep) && <div className="diagram-editor-hint" aria-live="polite">{connectionSource ? "Keçidi yaratmaq üçün digər addımı seç. Esc ilə ləğv et." : activeTool === "connect" ? "Keçidin başladığı fiquru seç." : activeTool === "pan" ? "Sahəni tut və sürüşdür · Esc ilə seçimə qayıt" : "Elementi seç · Tut və sürüşdür"}</div>}
+    {(onMoveStep || onEditStep) && <div className="diagram-editor-hint" aria-live="polite">{reconnectChoice || reconnectPreview ? `Keçidin ${reconnectChoice?.endpoint === "source" || reconnectPreview?.endpoint === "source" ? "başlanğıcı" : "hədəfi"} üçün fiqur seç və ya ucunu fiqura sürüşdür. Esc ilə ləğv et.` : draggingId ? dropLaneName ? `İcraçı: ${dropLaneName} · Buraxdıqda izah yenilənir` : "Addımı iştirakçı sahəsinə burax · Esc ilə ləğv et" : connectionSource ? "Keçidi yaratmaq üçün digər addımı seç. Esc ilə ləğv et." : activeTool === "connect" ? "Keçidin başladığı fiquru seç." : activeTool === "pan" ? "Sahəni tut və sürüşdür · Esc ilə seçimə qayıt" : selectedRoute ? "Keçidin ucundakı dairəni sürüşdür · Etiketə basıb izahı redaktə et" : "Elementi seç · Başqa iştirakçıya sürüşdür · İki kliklə redaktə et"}</div>}
     <span className="sr-only" role="status">{editNotice}</span>
-    <div ref={viewport} className={`diagram-viewport${panning ? " is-panning" : ""}${activeTool === "pan" ? " is-pan-tool" : ""}${draggingId ? " is-dragging-node" : ""}${connection || connectionSource ? " is-connecting" : ""}`} tabIndex={0} role="region" aria-label="Diaqram sahəsi. Fiqurları sürüşdürün. Seçilmiş fiquru ox düymələri ilə hərəkət etdirin."
+    <div ref={viewport} className={`diagram-viewport${panning ? " is-panning" : ""}${activeTool === "pan" ? " is-pan-tool" : ""}${draggingId ? " is-dragging-node" : ""}${connection || connectionSource || reconnectChoice || reconnectPreview ? " is-connecting" : ""}`} tabIndex={0} role="region" aria-label="Diaqram sahəsi. Fiqurları iştirakçılar arasında sürüşdürün. Keçidin ucunu başqa fiqura birləşdirin. Seçilmiş fiquru ox düymələri ilə hərəkət etdirin."
       onWheel={() => {
         const view = viewport.current;
         if (view && (view.scrollWidth > view.clientWidth + 1 || view.scrollHeight > view.clientHeight + 1)) stopAutomaticFit();
@@ -449,7 +572,8 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
         if (view.scrollWidth > view.clientWidth + 1 || view.scrollHeight > view.clientHeight + 1) stopAutomaticFit();
       }}
       onPointerDown={(event) => {
-        if (!event.isPrimary || event.button !== 0 || (activeTool !== "pan" && (event.target as Element).closest("[data-step-id], [data-route-index], [data-connection-handle]"))) return;
+        if (!event.isPrimary || event.button !== 0 || (activeTool !== "pan" && (event.target as Element).closest("[data-step-id], [data-route-index], [data-connection-handle], [data-route-handle]"))) return;
+        if (reconnectChoice) { setReconnectChoice(null); setEditNotice("Keçidin dəyişdirilməsi ləğv edildi."); return; }
         if (connectionSource) { setConnectionSource(null); return; }
         const view = viewport.current;
         if (!view) return;
@@ -494,6 +618,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             <rect x={lane.x} y={lane.y} width={136} height={lane.height} fill="#F8FAFB" />
             <line x1={lane.x + 136} y1={lane.y} x2={lane.x + 136} y2={lane.y + lane.height} stroke="#D5DBE2" />
             <TextLines text={lane.name || "Adsız iştirakçı"} x={lane.x + 68} y={lane.y + lane.height / 2 + 4} width={113} maxLines={5} size={12} color="#566270" />
+            {draftPosition?.laneId === lane.id && <rect className="diagram-lane-drop-target" data-editor-only="lane-drop-target" data-drop-lane-id={lane.id} x={lane.x + 2} y={lane.y + 2} width={lane.width - 4} height={lane.height - 4} fill="#2548E8" fillOpacity="0.06" stroke="#2548E8" strokeWidth="2" strokeDasharray="6 4" pointerEvents="none" />}
           </g>)}
           {layout.edges.map((edge, index) => {
             if (edge.points.length < 2) return null;
@@ -515,11 +640,20 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             const chipStroke = selected ? "#2548E8" : feedback ? "#EBB794" : approval ? "#9FD3B6" : "#D5DBE2";
             const chipInk = selected ? "#2548E8" : feedback ? "#A63F0B" : approval ? "#1B7048" : "#566270";
             return <g key={`${edge.sourceId}-${edge.routeIndex}-${index}`} className={`diagram-edge${selected ? " is-selected" : ""}`} data-route-source={edge.sourceId} data-route-index={edge.routeIndex} role={onSelectRoute ? "button" : undefined} tabIndex={onSelectRoute ? 0 : undefined} aria-label={`Keçid${number ? ` ${number}` : ""}: ${edge.label.trim() || "Şərtsiz"}`} aria-pressed={onSelectRoute ? selected : undefined}
-              onClick={(event) => { event.stopPropagation(); if (activeTool !== "pan") onSelectRoute?.(edge.sourceId, edge.routeIndex); }}
-              onDoubleClick={(event) => { event.stopPropagation(); if (activeTool !== "pan") onEditRoute?.(edge.sourceId, edge.routeIndex); }}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (activeTool === "pan") return;
+                cancelGesture();
+                setReconnectChoice(null);
+                setConnectionSource(null);
+                if ((event.target as Element).closest(".diagram-route-chip")) onEditRoute?.(edge.sourceId, edge.routeIndex);
+                else onSelectRoute?.(edge.sourceId, edge.routeIndex);
+              }}
+              onDoubleClick={(event) => { event.stopPropagation(); if (activeTool !== "pan") { cancelGesture(); setReconnectChoice(null); onEditRoute?.(edge.sourceId, edge.routeIndex); } }}
               onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onSelectRoute?.(edge.sourceId, edge.routeIndex); }
-                else if (event.key === "F2") { event.preventDefault(); event.stopPropagation(); onEditRoute?.(edge.sourceId, edge.routeIndex); }
+                if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); cancelGesture(); setReconnectChoice(null); setConnectionSource(null); onSelectRoute?.(edge.sourceId, edge.routeIndex); }
+                else if (event.key === "F2") { event.preventDefault(); event.stopPropagation(); cancelGesture(); setReconnectChoice(null); onEditRoute?.(edge.sourceId, edge.routeIndex); }
+                else if ((event.key === "Delete" || event.key === "Backspace") && onDeleteRoute) { event.preventDefault(); event.stopPropagation(); onDeleteRoute({ sourceId: edge.sourceId, routeIndex: edge.routeIndex }); }
               }}>
               <title>{`${number ? `${number}: ` : ""}${edge.label || "Şərtsiz keçid"}\nKliklə keçidi redaktə et.`}</title>
               <path d={path} fill="none" stroke="transparent" strokeWidth="14" className="diagram-edge-hit" />
@@ -550,7 +684,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             const stroke = selected ? "#2548E8" : gateway ? "#1F2630" : event ? step.type === "start" ? "#1B7048" : step.type === "end" ? "#8A2D2D" : "#566270" : "#BAC4CF";
             const fill = gateway ? "#1F2630" : "#FFFFFF";
             const stepNumber = getStepNumber(project, node.id);
-            const isTarget = connection?.targetId === node.id;
+            const isTarget = connection?.targetId === node.id || reconnectPreview?.targetId === node.id;
             return <g key={node.id}><g className={`diagram-node${onMoveStep ? " is-draggable" : ""}${draggingId === node.id ? " is-dragging" : ""}${isTarget ? " is-connect-target" : ""}`} data-step-id={node.id} role="button" tabIndex={0} aria-label={`${typeLabels[step.type]}: ${step.title || "Adsız addım"}`} aria-pressed={selected} style={{ touchAction: onMoveStep ? "none" : undefined }}
               onPointerDown={(event) => beginNodeDrag(event, node.id)}
               onClick={() => selectNode(node.id)}
@@ -594,7 +728,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
                 <text x={x + (stepNumber.length > 2 ? 8.5 : 6)} y={y - 3} textAnchor="middle" fill={selected ? "#FFFFFF" : "#566270"} fontFamily="'DM Mono', monospace" fontSize="10" fontWeight="500">{stepNumber}</text>
               </g>
               </g>
-              {selected && onConnect && step.type !== "end" && activeTool !== "pan" && <g className="diagram-connection-handle" data-editor-only="connection-handle" data-connection-handle={node.id} role="button" tabIndex={0} aria-label={`Keçid çək: ${step.title || "Adsız addım"}`} aria-pressed={connectionSource === node.id} style={{ touchAction: "none" }}
+              {selected && !selectedRoute && onConnect && step.type !== "end" && activeTool !== "pan" && <g className="diagram-connection-handle" data-editor-only="connection-handle" data-connection-handle={node.id} role="button" tabIndex={0} aria-label={`Keçid çək: ${step.title || "Adsız addım"}`} aria-pressed={connectionSource === node.id} style={{ touchAction: "none" }}
                 onPointerDown={(event) => beginConnection(event, node.id)}
                 onClick={(event) => event.stopPropagation()}
                 onKeyDown={(event) => {
@@ -607,6 +741,32 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
                 <circle cx={x + width + 14} cy={cy} r="11" fill="#2548E8" stroke="#FFFFFF" strokeWidth="2" />
                 <path d={`M ${x + width + 10} ${cy} H ${x + width + 18} M ${x + width + 14} ${cy - 4} V ${cy + 4}`} fill="none" stroke="#FFFFFF" strokeWidth="1.7" pointerEvents="none" />
               </g>}
+            </g>;
+          })}
+          {reconnectPreview && (() => {
+            const edge = layout.edges.find((item) => item.sourceId === reconnectPreview.selection.sourceId && item.routeIndex === reconnectPreview.selection.routeIndex);
+            if (!edge) return null;
+            const start = reconnectPreview.endpoint === "source" ? reconnectPreview.point : edge.points[0];
+            const end = reconnectPreview.endpoint === "target" ? reconnectPreview.point : edge.points[edge.points.length - 1];
+            const middleX = (start.x + end.x) / 2;
+            return <path className="diagram-reconnect-preview" data-editor-only="reconnect-preview" d={`M ${start.x} ${start.y} H ${middleX} V ${end.y} H ${end.x}`} fill="none" stroke="#2548E8" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />;
+          })()}
+          {selectedEdge && selectedRoute && onReconnectRoute && activeTool !== "pan" && (["source", "target"] as const).map((endpoint) => {
+            const point = endpoint === "source" ? selectedEdge.points[0] : selectedEdge.points[selectedEdge.points.length - 1];
+            const active = (reconnectChoice?.selection.sourceId === selectedRoute.sourceId && reconnectChoice.selection.routeIndex === selectedRoute.routeIndex && reconnectChoice.endpoint === endpoint)
+              || (reconnectPreview?.selection.sourceId === selectedRoute.sourceId && reconnectPreview.selection.routeIndex === selectedRoute.routeIndex && reconnectPreview.endpoint === endpoint);
+            return <g key={endpoint} className={`diagram-route-handle${active ? " is-active" : ""}`} data-editor-only="route-handle" data-route-handle={endpoint} data-route-source={selectedRoute.sourceId} data-route-index={selectedRoute.routeIndex} role="button" tabIndex={0} aria-label={endpoint === "source" ? "Keçidin başlanğıcını dəyiş" : "Keçidin hədəfini dəyiş"} aria-pressed={active} style={{ touchAction: "none", pointerEvents: reconnectChoice ? "none" : undefined }}
+              onPointerDown={(event) => beginReconnect(event, selectedRoute, endpoint)}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault(); event.stopPropagation(); cancelGesture(); setConnectionSource(null); setActiveTool("select");
+                  setReconnectChoice({ selection: selectedRoute, endpoint });
+                }
+              }}>
+              <title>{endpoint === "source" ? "Keçidin başlanğıcını" : "Keçidin hədəfini"} başqa fiqura sürüşdür və ya klikləyib fiqur seç. Etiket və izah saxlanılır.</title>
+              <circle cx={point.x} cy={point.y} r={14 / zoom} fill="transparent" />
+              <circle cx={point.x} cy={point.y} r={7 / zoom} fill={active ? "#2548E8" : "#FFFFFF"} stroke="#2548E8" strokeWidth={2 / zoom} />
             </g>;
           })}
           {!layout.nodes.length && <g>
@@ -628,7 +788,6 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
       </>}
       {onConnect && <button type="button" className={`diagram-tool${activeTool === "connect" ? " is-active" : ""}`} aria-label="Keçid çək" aria-pressed={activeTool === "connect"} title="Fiqurları bağla" disabled={!project.steps.length} onClick={() => selectTool(activeTool === "connect" ? "select" : "connect")}><Waypoints size={20} /></button>}
       {onAddShape && <button type="button" className="diagram-tool" aria-label="Diaqramda qeyd əlavə et" title="Qeyd əlavə et" disabled={controlsDisabled} onClick={() => addShape("annotation")}><StickyNote size={20} /></button>}
-      {onEditStep && <button type="button" className="diagram-tool" aria-label="Seçilmiş fiquru redaktə et" title="Seçilmiş fiquru redaktə et" disabled={!selectedId} onClick={() => selectedId && onEditStep(selectedId)}><Pencil size={20} /></button>}
     </div>}
     <div className="diagram-legend" aria-label="Diaqram işarələri">
       <span className="diagram-key event"><i />Başlanğıc</span>

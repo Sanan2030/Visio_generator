@@ -5,6 +5,7 @@ import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, CircleHelp,
 import type { Step, StepType } from "@/lib/types";
 import { createId, createProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
 import { clampNodePosition } from "@/lib/layout";
+import { duplicateDiagramStep, moveDiagramStep, reconnectDiagramRoute } from "@/lib/diagram-edit";
 import { getRouteNumber } from "@/lib/step-numbering";
 import { download, filename } from "@/lib/storage";
 import { useProject } from "@/lib/use-project";
@@ -22,10 +23,11 @@ const tabs: { value: Tab; label: string }[] = [
 ];
 
 export default function Workspace() {
-  const { project, ready, saveState, undoCount, update, undo, replace, reset, unsavedReplacement, confirmReplacement, cancelReplacement, notice, setNotice } = useProject();
+  const { project, ready, saveState, undoCount, redoCount, update, undo, redo, replace, reset, unsavedReplacement, confirmReplacement, cancelReplacement, notice, setNotice } = useProject();
   const [tab, setTab] = useState<Tab>("people");
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<DiagramRouteSelection | null>(null);
+  const [routeEditorOpen, setRouteEditorOpen] = useState(false);
   const [inspectorStep, setInspectorStep] = useState<string | null>(null);
   const [modal, setModal] = useState<Modal>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -47,6 +49,7 @@ export default function Workspace() {
     setTab(project.steps.length ? "steps" : "people");
     setSelected(project.steps[0]?.id ?? null);
     setSelectedRoute(null);
+    setRouteEditorOpen(false);
     setInspectorStep(null);
     setMenuOpen(false);
     formScroll.current?.scrollTo({ top: 0 });
@@ -54,7 +57,7 @@ export default function Workspace() {
 
   useEffect(() => {
     if (inspectorStep && !project.steps.some(step => step.id === inspectorStep)) setInspectorStep(null);
-    if (selectedRoute && !project.steps.find(step => step.id === selectedRoute.sourceId)?.routes[selectedRoute.routeIndex]) setSelectedRoute(null);
+    if (selectedRoute && !project.steps.find(step => step.id === selectedRoute.sourceId)?.routes[selectedRoute.routeIndex]) { setSelectedRoute(null); setRouteEditorOpen(false); }
   }, [project.steps, inspectorStep, selectedRoute]);
 
   useEffect(() => {
@@ -97,6 +100,7 @@ export default function Workspace() {
   function selectStep(id: string) {
     setSelected(id);
     setSelectedRoute(null);
+    setRouteEditorOpen(false);
     if (inspectorStep && inspectorStep !== id) setInspectorStep(null);
     setTab("steps");
   }
@@ -106,9 +110,10 @@ export default function Workspace() {
     setInspectorStep(id);
   }
 
-  function selectRoute(sourceId: string, routeIndex: number) {
+  function selectRoute(sourceId: string, routeIndex: number, openEditor = true) {
     setSelected(sourceId);
     setSelectedRoute({ sourceId, routeIndex });
+    setRouteEditorOpen(openEditor);
     setInspectorStep(null);
     setTab("steps");
   }
@@ -116,18 +121,60 @@ export default function Workspace() {
   function removeRoute(sourceId: string, routeIndex: number) {
     update(current => ({ ...current, steps: current.steps.map(step => step.id === sourceId ? { ...step, routes: step.routes.filter((_, index) => index !== routeIndex) } : step) }));
     if (selectedRoute?.sourceId === sourceId) {
-      if (selectedRoute.routeIndex === routeIndex) setSelectedRoute(null);
+      if (selectedRoute.routeIndex === routeIndex) { setSelectedRoute(null); setRouteEditorOpen(false); }
       else if (selectedRoute.routeIndex > routeIndex) setSelectedRoute({ sourceId, routeIndex: selectedRoute.routeIndex - 1 });
     }
   }
 
-  function moveStep(id: string, position: { x: number; y: number }) {
+  function moveStep(id: string, position: { x: number; y: number }, laneId?: string) {
     const bounded = clampNodePosition(position);
+    update(current => moveDiagramStep(current, id, bounded, laneId));
+  }
+
+  function reconnectRoute(selection: DiagramRouteSelection, endpoint: "source" | "target", nodeId: string): boolean {
+    let result: ReturnType<typeof reconnectDiagramRoute> | undefined;
     update(current => {
-      const step = current.steps.find(item => item.id === id);
-      if (!step || (step.position?.x === bounded.x && step.position?.y === bounded.y)) return current;
-      return { ...current, steps: current.steps.map(item => item.id === id ? { ...item, position: bounded } : item) };
+      result = reconnectDiagramRoute(current, selection, endpoint, nodeId);
+      return result.project;
     });
+    if (!result) return false;
+    if (result.error) { setNotice(result.error); return false; }
+    setSelected(result.selection.sourceId);
+    setSelectedRoute(result.selection);
+    setInspectorStep(null);
+    setTab("steps");
+    return true;
+  }
+
+  function duplicateStep(id: string) {
+    const newId = createId();
+    let result: ReturnType<typeof duplicateDiagramStep> | undefined;
+    update(current => {
+      result = duplicateDiagramStep(current, id, newId);
+      return result.project;
+    });
+    if (result?.error) { setNotice(result.error); return; }
+    if (result?.stepId) {
+      editStep(result.stepId);
+      setNotice("Addımın surəti yaradıldı. Keçidlərini özün seçərək axına əlavə et.");
+    }
+  }
+
+  function clearEditorSelection() {
+    setSelected(null);
+    setSelectedRoute(null);
+    setRouteEditorOpen(false);
+    setInspectorStep(null);
+  }
+
+  function undoEdit() {
+    clearEditorSelection();
+    undo();
+  }
+
+  function redoEdit() {
+    clearEditorSelection();
+    redo();
   }
 
   function resetLayout() {
@@ -322,7 +369,7 @@ export default function Workspace() {
                 return <article className={`step-card ${open ? "is-open" : ""}`} key={step.id} id={`step-form-${step.id}`}>
                   <div className="step-summary-row">
                     <button type="button" className="step-summary" aria-label={`${index+1}-ci addımı aç`} aria-expanded={open} aria-controls={`step-fields-${step.id}`} onClick={()=>{
-                      if (open) { setSelected(null); setSelectedRoute(null); setInspectorStep(null); }
+                      if (open) { setSelected(null); setSelectedRoute(null); setRouteEditorOpen(false); setInspectorStep(null); }
                       else selectStep(step.id);
                     }}>
                       <span className="step-number">{index+1}</span><span className="step-summary-text"><strong>{step.title||"Adsız addım"}</strong><small>{lane?.name||"İcraçı seçilməyib"} <span>·</span> {kind}</small></span><ChevronDown size={15} className="step-summary-chevron"/>
@@ -382,8 +429,8 @@ export default function Workspace() {
 
       <section className="preview-panel" aria-label="Canlı iş axını">
         <div className="preview-heading"><div className="canvas-title"><span className="live-dot"/><h2>Canlı diaqram</h2></div><div className="canvas-stats">{project.pools.length} pool <span>·</span> {lanes.length} icraçı <span>·</span> {project.steps.length} addım</div></div>
-        <Diagram project={project} selectedId={selected} selectedRoute={selectedRoute} onSelect={selectStep} onEditStep={editStep} onSelectRoute={selectRoute} onEditRoute={selectRoute} onMoveStep={moveStep} onResetLayout={resetLayout} onConnect={connectSteps} onDeleteStep={deleteStep} onAddShape={type=>addStep(type,true)} controlsDisabled={!ready || project.steps.length>=200} onUndo={undo} canUndo={undoCount>0}>
-          {(inspectorStep || selectedRoute) && <CanvasInspector project={project} stepId={inspectorStep} routeSelection={selectedRoute} onUpdate={updateStep} onDeleteStep={deleteStep} onDeleteRoute={removeRoute} onClose={()=>{setInspectorStep(null);setSelectedRoute(null);}}/>}
+        <Diagram project={project} selectedId={selected} selectedRoute={selectedRoute} onSelect={selectStep} onEditStep={editStep} onSelectRoute={(sourceId,index)=>selectRoute(sourceId,index,false)} onEditRoute={selectRoute} onMoveStep={moveStep} onReconnectRoute={reconnectRoute} onDuplicateStep={duplicateStep} onDeleteRoute={selection=>removeRoute(selection.sourceId,selection.routeIndex)} onResetLayout={resetLayout} onConnect={connectSteps} onDeleteStep={deleteStep} onAddShape={type=>addStep(type,true)} controlsDisabled={!ready || project.steps.length>=200} onUndo={undoEdit} canUndo={undoCount>0} onRedo={redoEdit} canRedo={redoCount>0}>
+          {(inspectorStep || (selectedRoute && routeEditorOpen)) && <CanvasInspector project={project} stepId={inspectorStep} routeSelection={routeEditorOpen ? selectedRoute : null} onUpdate={updateStep} onReconnectRoute={reconnectRoute} onDuplicateStep={duplicateStep} onDeleteStep={deleteStep} onDeleteRoute={removeRoute} onClose={()=>{setInspectorStep(null);setRouteEditorOpen(false);}}/>}
         </Diagram>
       </section>
     </main>
@@ -393,7 +440,7 @@ export default function Workspace() {
       <button type="button" className="modal-close icon-button" aria-label="Pəncərəni bağla" onClick={closeModal}><X size={18}/></button>
       <span className={`modal-icon ${activeModal==="reset"||activeModal==="unsaved"?"red":""}`}>{activeModal==="reset"?<Trash2 size={24}/>:activeModal==="sample"?<Layers3 size={24}/>:<CircleHelp size={24}/>}</span>
       <h2 id="modal-title">{activeModal==="reset"?"Hər şeyi silmək istəyirsən?":activeModal==="sample"?"Nümunə prosesi açaq?":activeModal==="unsaved"?"Dəyişikliklər saxlanılmayıb":activeModal==="table"?"İş axınının izah cədvəli":"Formadan Visio diaqramına"}</h2>
-      {activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru sürüklə, iki kliklə redaktə et. Seçilmiş fiqurun + tutacağını digər fiqura apararaq onları bağla.</p><p><strong>3. Keçidə izah yaz.</strong> Xəttin etiketinə bas. Qısa etiket və ətraflı izahı açılan paneldə doldur. Bir neçə qol varsa, onların nömrələri Word cədvəlində də eynidir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
+      {activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru başqa iştirakçının sahəsinə sürüşdür: izahda icraçı da dəyişir. İki kliklə və ya Redaktə et düyməsi ilə paneli aç. Seçilmiş fiqurun + tutacağını digər fiqura apararaq yeni keçid yarat.</p><p><strong>3. Keçidə izah yaz.</strong> Xətti seçib ucundakı dairəni başqa fiqura sürüşdürərək oxun başlanğıcını və ya hədəfini dəyiş. Etiketə basıb qısa mətni və ətraflı izahı doldur. İcraçı, hədəf və qol nömrələri Word cədvəlində də yenilənir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
         <p>{activeModal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri silinəcək. Bu əməliyyat geri qaytarılmır.":activeModal==="sample"?"Müştəri müraciətləri nümunəsi açılacaq. Saxlanmış layihən öz əvvəlki ünvanında qalacaq.":"Brauzer son dəyişiklikləri saxlaya bilmədi. Hazırkı işi açıq saxlaya və ya dəyişiklikləri itirməyi qəbul edib davam edə bilərsən."}</p>
         <div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Ləğv et</button><button type="button" className={activeModal==="sample"?"primary-button":"danger-button"} onClick={activeModal==="reset"?clearProjects:activeModal==="sample"?sample:()=>{confirmReplacement();setModal(null);}}>{activeModal==="reset"?"Bəli, hər şeyi sil":activeModal==="sample"?"Nümunəni aç":"Saxlamadan davam et"}</button></div>
       </>}
