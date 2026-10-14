@@ -81,7 +81,7 @@ function longProject(count = 200): Project {
   };
 }
 
-test("the workspace presents a readable dark form beside a full-height white diagram without JSON controls", async ({ page }, testInfo) => {
+test("the workspace presents a readable dark form and full-height dark diagram without JSON controls", async ({ page }, testInfo) => {
   await openWorkspace(page);
   await expect(page.getByRole("navigation", { name: "Proses forması" }).getByRole("button")).toHaveCount(3);
   await expect(page.locator("input[type='file']")).toHaveCount(0);
@@ -109,17 +109,33 @@ test("the workspace presents a readable dark form beside a full-height white dia
     const form = getComputedStyle(panel);
     const input = getComputedStyle(panel.querySelector("input")!);
     const canvas = getComputedStyle(document.querySelector(".diagram-viewport")!);
+    const canvasHeading = getComputedStyle(document.querySelector(".canvas-title h2")!);
+    const canvasStats = getComputedStyle(document.querySelector(".canvas-stats")!);
+    const canvasProjectTitle = getComputedStyle(document.querySelector(".diagram-project-title")!);
+    const controls = getComputedStyle(document.querySelector(".diagram-controls")!);
+    const zoomControl = getComputedStyle(document.querySelector("button[aria-label='Diaqramı kiçilt']")!);
+    const zoomText = getComputedStyle(document.querySelector(".diagram-zoom")!);
     return {
       formLuminance: luminance(form.backgroundColor),
       canvasLuminance: luminance(canvas.backgroundColor),
       formContrast: contrast(form.color, form.backgroundColor),
       inputContrast: contrast(input.color, input.backgroundColor),
+      canvasHeadingContrast: contrast(canvasHeading.color, canvas.backgroundColor),
+      canvasStatsContrast: contrast(canvasStats.color, canvas.backgroundColor),
+      canvasProjectTitleContrast: contrast(canvasProjectTitle.fill, canvas.backgroundColor),
+      canvasControlContrast: contrast(zoomControl.color, controls.backgroundColor),
+      canvasZoomContrast: contrast(zoomText.color, controls.backgroundColor),
     };
   });
   expect(colors.formLuminance).toBeLessThan(0.1);
-  expect(colors.canvasLuminance).toBeGreaterThan(0.95);
+  expect(colors.canvasLuminance).toBeLessThan(0.1);
   expect(colors.formContrast).toBeGreaterThanOrEqual(4.5);
   expect(colors.inputContrast).toBeGreaterThanOrEqual(4.5);
+  expect(colors.canvasHeadingContrast).toBeGreaterThanOrEqual(4.5);
+  expect(colors.canvasStatsContrast).toBeGreaterThanOrEqual(4.5);
+  expect(colors.canvasProjectTitleContrast).toBeGreaterThanOrEqual(4.5);
+  expect(colors.canvasControlContrast).toBeGreaterThanOrEqual(4.5);
+  expect(colors.canvasZoomContrast).toBeGreaterThanOrEqual(4.5);
   await expect(page.getByRole("button", { name: "Word izahını yüklə", exact: true })).toBeVisible();
   const preview = (await page.locator(".preview-panel").boundingBox())!;
   expect(preview.y + preview.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 1);
@@ -129,7 +145,7 @@ test("the workspace presents a readable dark form beside a full-height white dia
   await page.keyboard.press("Escape");
   await expect(projectMenu).toHaveAttribute("aria-expanded", "false");
   await expect(projectMenu).toBeFocused();
-  await page.screenshot({ path: testInfo.outputPath("dark-form-white-diagram.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("dark-form-dark-diagram.png"), fullPage: true });
 });
 
 test("form editing builds a connected live flow and restores every field after reload", async ({ page }) => {

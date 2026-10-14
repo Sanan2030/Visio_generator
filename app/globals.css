@@ -40,8 +40,8 @@
   --mono: "DM Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-/* Dark form surfaces; the diagram keeps the light root palette. */
-.studio-header, .form-panel, .modal, .toast {
+/* Shared dark palette for the form, diagram and supporting panels. */
+.studio-header, .form-panel, .preview-panel, .modal, .toast {
   color-scheme: dark;
   --bg: #141a22;
   --panel: #181e27;
@@ -388,7 +388,35 @@ h1, h2, h3, p { margin: 0; }
 .row-number-button { padding: 3px 5px; border-radius: 5px; color: var(--accent); background: var(--accent-soft); font-family: var(--mono); font-size: 12px; }
 .row-number-button:hover { background: var(--accent-soft-hover); }
 
-.preview-panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); --bg: #ffffff; }
+.preview-panel {
+  position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg);
+  --diagram-surface: #181e27;
+  --diagram-header: #212936;
+  --diagram-node: #253044;
+  --diagram-ink: #e3e9f2;
+  --diagram-muted: #b3bfce;
+  --diagram-border: #65778f;
+  --diagram-shape-border: #7f91a9;
+  --diagram-gateway: #304569;
+  --diagram-gateway-border: #7f91a9;
+  --diagram-on-gateway: #e3e9f2;
+  --diagram-start: #8dd5b0;
+  --diagram-end: #f4a4a4;
+  --diagram-annotation: #98a8bc;
+  --diagram-accent: #98b3ff;
+  --diagram-accent-soft: #243858;
+  --diagram-on-accent: #141a22;
+  --diagram-edge: #98a8bc;
+  --diagram-feedback-edge: #e9bb8f;
+  --diagram-feedback-fill: #3e3227;
+  --diagram-feedback-border: #a78765;
+  --diagram-feedback-ink: #e9bb8f;
+  --diagram-approval-fill: #21372d;
+  --diagram-approval-border: #6a9e7f;
+  --diagram-approval-ink: #8dd5b0;
+  --diagram-chip: #212936;
+  --diagram-badge: #273448;
+}
 .preview-heading { position: absolute; top: 28px; right: 40px; left: 40px; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 24px; pointer-events: none; z-index: 3; }
 .canvas-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .canvas-title h2, .canvas-title strong { display: block; overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -402,19 +430,19 @@ h1, h2, h3, p { margin: 0; }
 .diagram-toolbar { position: absolute; right: 24px; bottom: 24px; z-index: 6; }
 .diagram-title, .diagram-toolbar-label { display: none; }
 .diagram-controls { display: flex; align-items: center; gap: 2px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 4px 18px rgb(20 24 29 / 6%); }
-.diagram-control { width: 40px; height: 44px; padding: 0; border-radius: 8px; background: transparent; color: #3b4652; }
+.diagram-control { width: 40px; height: 44px; padding: 0; border-radius: 8px; background: transparent; color: var(--muted); }
 .diagram-control:hover:not(:disabled) { background: var(--surface-hover); }
 .diagram-control.active, .diagram-control[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
 .diagram-zoom { min-width: 44px; color: var(--ink); font-family: var(--mono); font-size: 12px; text-align: center; }
 .diagram-divider, .diagram-controls-divider { width: 1px; height: 24px; margin: 0 4px; background: var(--line); }
 .diagram-palette, .canvas-actionbar { position: absolute; bottom: 24px; left: 45%; display: flex; align-items: center; gap: 4px; max-width: calc(100% - 32px); padding: 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 8px 24px rgb(20 24 29 / 10%); transform: translateX(-50%); z-index: 6; }
-.diagram-tool { width: 44px; height: 44px; padding: 0; border-radius: 10px; background: transparent; color: #3b4652; }
+.diagram-tool { width: 44px; height: 44px; padding: 0; border-radius: 10px; background: transparent; color: var(--muted); }
 .diagram-tool:hover:not(:disabled) { background: var(--surface-hover); }
-.diagram-tool.is-active, .diagram-tool[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.diagram-tool.is-active, .diagram-tool[aria-pressed="true"] { background: var(--action); color: #fff; }
 .diagram-tool.has-label { width: auto; min-width: 44px; padding: 0 12px; white-space: nowrap; }
 .diagram-selection-actions { position: absolute; top: 76px; left: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: calc(100% - 48px); padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 4px 18px rgb(20 24 29 / 9%); z-index: 6; }
 .diagram-selection-actions .diagram-tool { flex-shrink: 0; }
-.diagram-selection-action { min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; background: transparent; color: #3b4652; white-space: nowrap; }
+.diagram-selection-action { min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 8px; background: transparent; color: var(--muted); white-space: nowrap; }
 .diagram-selection-action:hover:not(:disabled) { background: var(--surface-hover); }
 .diagram-selection-action.danger-icon:hover:not(:disabled) { background: var(--danger-soft); }
 .diagram-selection-actions .danger-icon { color: var(--danger); }
@@ -423,7 +451,7 @@ h1, h2, h3, p { margin: 0; }
 .canvas-shape-picker { min-width: 0; max-width: 150px; }
 .canvas-shape-picker select { font-size: 12px; }
 .diagram-editor-hint { position: absolute; bottom: 40px; left: 40px; max-width: 200px; color: var(--muted); font-size: 12px; line-height: 1.5; pointer-events: none; z-index: 3; }
-.diagram-viewport { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: auto; background-color: var(--bg); background-image: radial-gradient(circle, #dde3ea 1px, transparent 1.3px); background-size: 24px 24px; cursor: grab; touch-action: pan-x pan-y; overscroll-behavior: contain; }
+.diagram-viewport { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: auto; background-color: var(--bg); background-image: radial-gradient(circle, #2a3444 1px, transparent 1.3px); background-size: 24px 24px; cursor: grab; touch-action: pan-x pan-y; overscroll-behavior: contain; }
 .diagram-viewport.is-panning { cursor: grabbing; user-select: none; }
 .diagram-viewport:focus-visible { outline-offset: -3px; }
 .diagram-surface { display: grid; place-items: center; min-width: 100%; min-height: 100%; padding: 24px; }
@@ -447,11 +475,11 @@ h1, h2, h3, p { margin: 0; }
 .diagram-route-handle:focus-visible { outline: none; }
 .diagram-route-handle:hover > circle:last-child, .diagram-route-handle:focus-visible > circle:last-child { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; }
 .diagram-route-handle:focus-visible > circle:last-child { stroke: var(--ink); }
-.diagram-route-handle.is-active > circle:last-child { fill: var(--accent); stroke: #fff; }
-.diagram-lane-drop-target { fill: rgb(37 72 232 / 8%); fill-opacity: 1; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.diagram-route-handle.is-active > circle:last-child { fill: var(--accent-soft); stroke: var(--accent); }
+.diagram-lane-drop-target { fill: rgb(152 179 255 / 12%); fill-opacity: 1; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
 .diagram-connection-preview, .diagram-step-number { pointer-events: none; }
 .diagram-viewport.is-connecting { cursor: crosshair; }
-.diagram-notice { position: absolute; top: 72px; left: 24px; right: 24px; padding: 10px 14px; border: 1px solid #ebb794; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 12px; z-index: 7; }
+.diagram-notice { position: absolute; top: 72px; left: 24px; right: 24px; padding: 10px 14px; border: 1px solid var(--warning-line); border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 12px; z-index: 7; }
 .diagram-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; min-height: 220px; padding: 30px; color: var(--muted); text-align: center; }
 .diagram-empty strong { color: var(--ink); font-size: 15px; font-weight: 600; }
 .diagram-empty p { max-width: 320px; font-size: 13px; line-height: 1.7; }

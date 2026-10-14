@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Circle, Copy, Diamond, Expand, Minus, MousePointer2, Move, Pencil, Plus, Redo2, RotateCcw, Scan, Shrink, Square, StickyNote, Trash2, Undo2, Waypoints } from "lucide-react";
 import { clampNodePosition, layoutProject } from "@/lib/layout";
+import { diagramColor } from "@/lib/diagram-palette";
 import { displayRouteLabel, getStepNumber } from "@/lib/step-numbering";
 import type { LayoutLane, LayoutPoint, Project, StepType } from "@/lib/types";
 
@@ -75,7 +76,7 @@ function wrapText(value: string, length: number, maxLines = 4) {
   return lines.length ? lines : ["Adsız addım"];
 }
 
-function TextLines({ text, x, y, width = 140, maxLines = 4, size = 12, color = "#14181D" }: {
+function TextLines({ text, x, y, width = 140, maxLines = 4, size = 12, color = diagramColor("ink") }: {
   text: string; x: number; y: number; width?: number; maxLines?: number; size?: number; color?: string;
 }) {
   const lines = wrapText(text, Math.max(6, Math.floor(width / (size * 0.54))), maxLines);
@@ -603,23 +604,23 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             <marker id={`${markerPrefix}-arrow`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="context-stroke" /></marker>
             <marker id={`${markerPrefix}-message`} markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M 1 1 L 8 4.5 L 1 8" fill="none" stroke="context-stroke" strokeWidth="1.2" /></marker>
           </defs>
-          <text className="diagram-project-title" x={16} y={7} fill="#14181D" fontSize={14 / zoom} fontWeight="600" letterSpacing={-0.2 / zoom}>
+          <text className="diagram-project-title" x={16} y={7} fill={diagramColor("ink")} fontSize={14 / zoom} fontWeight="600" letterSpacing={-0.2 / zoom}>
             <title>{project.name || "Yeni iş axını"}</title>
             {wrapText(project.name || "Yeni iş axını", Math.max(8, Math.floor((diagramWidth - 32) * zoom / 7.6)), 1)[0]}
           </text>
           {layout.pools.map((pool, index) => <g key={pool.id}>
-            <rect x={pool.x} y={pool.y} width={pool.width} height={pool.height} rx="8" fill="#FFFFFF" stroke="#D5DBE2" strokeWidth="1.3" />
-            <path d={`M ${pool.x + 8} ${pool.y} H ${pool.x + pool.width - 8} Q ${pool.x + pool.width} ${pool.y} ${pool.x + pool.width} ${pool.y + 8} V ${pool.y + 36} H ${pool.x} V ${pool.y + 8} Q ${pool.x} ${pool.y} ${pool.x + 8} ${pool.y} Z`} fill="#F8FAFB" />
-            <text x={pool.x + 16} y={pool.y + 23} fill="#14181D" fontSize="12" fontWeight="600"><title>{pool.name || "Adsız pool"}</title>{wrapText(pool.name || "Adsız pool", Math.max(8, Math.floor((pool.width - 124) / 6.5)), 1)[0]}</text>
-            <text x={pool.x + pool.width - 16} y={pool.y + 23} textAnchor="end" fill="#566270" fontSize="10">POOL {index + 1}</text>
+            <rect x={pool.x} y={pool.y} width={pool.width} height={pool.height} rx="8" fill={diagramColor("surface")} stroke={diagramColor("border")} strokeWidth="1.3" />
+            <path d={`M ${pool.x + 8} ${pool.y} H ${pool.x + pool.width - 8} Q ${pool.x + pool.width} ${pool.y} ${pool.x + pool.width} ${pool.y + 8} V ${pool.y + 36} H ${pool.x} V ${pool.y + 8} Q ${pool.x} ${pool.y} ${pool.x + 8} ${pool.y} Z`} fill={diagramColor("header")} />
+            <text x={pool.x + 16} y={pool.y + 23} fill={diagramColor("ink")} fontSize="12" fontWeight="600"><title>{pool.name || "Adsız pool"}</title>{wrapText(pool.name || "Adsız pool", Math.max(8, Math.floor((pool.width - 124) / 6.5)), 1)[0]}</text>
+            <text x={pool.x + pool.width - 16} y={pool.y + 23} textAnchor="end" fill={diagramColor("muted")} fontSize="10">POOL {index + 1}</text>
           </g>)}
           {layout.lanes.map((lane) => <g key={lane.id}>
             <title>{lane.name || "Adsız iştirakçı"}</title>
-            <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} fill="#FFFFFF" stroke="#D5DBE2" strokeWidth="1" />
-            <rect x={lane.x} y={lane.y} width={136} height={lane.height} fill="#F8FAFB" />
-            <line x1={lane.x + 136} y1={lane.y} x2={lane.x + 136} y2={lane.y + lane.height} stroke="#D5DBE2" />
-            <TextLines text={lane.name || "Adsız iştirakçı"} x={lane.x + 68} y={lane.y + lane.height / 2 + 4} width={113} maxLines={5} size={12} color="#566270" />
-            {draftPosition?.laneId === lane.id && <rect className="diagram-lane-drop-target" data-editor-only="lane-drop-target" data-drop-lane-id={lane.id} x={lane.x + 2} y={lane.y + 2} width={lane.width - 4} height={lane.height - 4} fill="#2548E8" fillOpacity="0.06" stroke="#2548E8" strokeWidth="2" strokeDasharray="6 4" pointerEvents="none" />}
+            <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} fill={diagramColor("surface")} stroke={diagramColor("border")} strokeWidth="1" />
+            <rect x={lane.x} y={lane.y} width={136} height={lane.height} fill={diagramColor("header")} />
+            <line x1={lane.x + 136} y1={lane.y} x2={lane.x + 136} y2={lane.y + lane.height} stroke={diagramColor("border")} />
+            <TextLines text={lane.name || "Adsız iştirakçı"} x={lane.x + 68} y={lane.y + lane.height / 2 + 4} width={113} maxLines={5} size={12} color={diagramColor("muted")} />
+            {draftPosition?.laneId === lane.id && <rect className="diagram-lane-drop-target" data-editor-only="lane-drop-target" data-drop-lane-id={lane.id} x={lane.x + 2} y={lane.y + 2} width={lane.width - 4} height={lane.height - 4} fill={diagramColor("accent")} fillOpacity="0.06" stroke={diagramColor("accent")} strokeWidth="2" strokeDasharray="6 4" pointerEvents="none" />}
           </g>)}
           {layout.edges.map((edge, index) => {
             if (edge.points.length < 2) return null;
@@ -636,10 +637,10 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             const routeCaption = edge.label.toLocaleLowerCase("az");
             const feedback = /imtina|rədd|geri|qaytar|reject|decline|return/.test(routeCaption);
             const approval = !feedback && /təsdiq|bəli|yes|approve|confirm/.test(routeCaption);
-            const edgeColor = selected ? "#2548E8" : feedback ? "#B8470F" : "#6F7B88";
-            const chipFill = selected ? "#E8ECFD" : feedback ? "#FCEBDD" : approval ? "#DDF2E6" : "#F8FAFB";
-            const chipStroke = selected ? "#2548E8" : feedback ? "#EBB794" : approval ? "#9FD3B6" : "#D5DBE2";
-            const chipInk = selected ? "#2548E8" : feedback ? "#A63F0B" : approval ? "#1B7048" : "#566270";
+            const edgeColor = selected ? diagramColor("accent") : feedback ? diagramColor("feedback-edge") : diagramColor("edge");
+            const chipFill = selected ? diagramColor("accent-soft") : feedback ? diagramColor("feedback-fill") : approval ? diagramColor("approval-fill") : diagramColor("chip");
+            const chipStroke = selected ? diagramColor("accent") : feedback ? diagramColor("feedback-border") : approval ? diagramColor("approval-border") : diagramColor("border");
+            const chipInk = selected ? diagramColor("accent") : feedback ? diagramColor("feedback-ink") : approval ? diagramColor("approval-ink") : diagramColor("muted");
             return <g key={`${edge.sourceId}-${edge.routeIndex}-${index}`} className={`diagram-edge${selected ? " is-selected" : ""}`} data-route-source={edge.sourceId} data-route-index={edge.routeIndex} role={onSelectRoute ? "button" : undefined} tabIndex={onSelectRoute ? 0 : undefined} aria-label={`Keçid${number ? ` ${number}` : ""}: ${edge.label.trim() || "Şərtsiz"}`} aria-pressed={onSelectRoute ? selected : undefined}
               onClick={(event) => {
                 event.stopPropagation();
@@ -659,7 +660,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
               <title>{`${number ? `${number}: ` : ""}${edge.label || "Şərtsiz keçid"}\nKliklə keçidi redaktə et.`}</title>
               <path d={path} fill="none" stroke="transparent" strokeWidth="14" className="diagram-edge-hit" />
               <path d={path} fill="none" stroke={edgeColor} strokeWidth={selected ? "2.6" : "1.65"} strokeDasharray={association ? "2 4" : edge.message ? "6 5" : undefined} strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" markerEnd={association ? undefined : `url(#${markerPrefix}-${edge.message ? "message" : "arrow"})`} />
-              {edge.message && !association && <circle cx={edge.points[0].x} cy={edge.points[0].y} r="3" fill="#FFFFFF" stroke={edgeColor} strokeWidth="1.3" />}
+              {edge.message && !association && <circle cx={edge.points[0].x} cy={edge.points[0].y} r="3" fill={diagramColor("node")} stroke={edgeColor} strokeWidth="1.3" />}
               {chipText && <g className="diagram-route-chip">
                 <rect x={label.x - labelWidth / 2} y={label.y - 10} width={labelWidth} height={21} rx="10.5" fill={chipFill} stroke={chipStroke} strokeWidth="0.8" />
                 <text x={label.x} y={label.y + 4} textAnchor="middle" fill={chipInk} fontFamily="'DM Mono', monospace" fontSize="10" fontWeight="500" pointerEvents="none">{labelLines[0]}</text>
@@ -671,7 +672,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             if (!source) return null;
             const start = { x: source.x + source.width + 14, y: source.y + source.height / 2 };
             const middleX = (start.x + connection.point.x) / 2;
-            return <path className="diagram-connection-preview" data-editor-only="connection" d={`M ${start.x} ${start.y} H ${middleX} V ${connection.point.y} H ${connection.point.x}`} fill="none" stroke="#2548E8" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />;
+            return <path className="diagram-connection-preview" data-editor-only="connection" d={`M ${start.x} ${start.y} H ${middleX} V ${connection.point.y} H ${connection.point.x}`} fill="none" stroke={diagramColor("accent")} strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />;
           })()}
           {layout.nodes.map((node) => {
             const step = stepById.get(node.id);
@@ -682,8 +683,8 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             const gateway = ["xor", "or", "and"].includes(step.type);
             const event = ["start", "end", "intermediate", "message", "timer"].includes(step.type);
             const r = Math.min(width, height) / 2;
-            const stroke = selected ? "#2548E8" : gateway ? "#1F2630" : event ? step.type === "start" ? "#1B7048" : step.type === "end" ? "#8A2D2D" : "#566270" : "#BAC4CF";
-            const fill = gateway ? "#1F2630" : "#FFFFFF";
+            const stroke = selected ? diagramColor("accent") : gateway ? diagramColor("gateway-border") : event ? step.type === "start" ? diagramColor("start") : step.type === "end" ? diagramColor("end") : diagramColor("muted") : diagramColor("shape-border");
+            const fill = gateway ? diagramColor("gateway") : diagramColor("node");
             const stepNumber = getStepNumber(project, node.id);
             const isTarget = connection?.targetId === node.id || reconnectPreview?.targetId === node.id;
             return <g key={node.id}><g className={`diagram-node${onMoveStep ? " is-draggable" : ""}${draggingId === node.id ? " is-dragging" : ""}${isTarget ? " is-connect-target" : ""}`} data-step-id={node.id} role="button" tabIndex={0} aria-label={`${typeLabels[step.type]}: ${step.title || "Adsız addım"}`} aria-pressed={selected} style={{ touchAction: onMoveStep ? "none" : undefined }}
@@ -698,35 +699,35 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
                 else if (event.key === "Delete" || event.key === "Backspace") { if (onDeleteStep) { event.preventDefault(); event.stopPropagation(); onDeleteStep(node.id); } }
               }}>
               <title>{`${stepNumber}. ${typeLabels[step.type]}: ${step.title || "Adsız addım"}${step.description ? `\n${step.description}` : ""}\nSürüşdür və ya iki dəfə kliklə redaktə et.`}</title>
-              {selected && <rect data-editor-only="selection" x={x - 4} y={y - 4} width={width + 8} height={height + 8} rx={event ? r + 4 : 12} fill="none" stroke="#2548E8" strokeOpacity="0.14" strokeWidth="6" />}
-              {isTarget && <rect data-editor-only="connection-target" x={x - 9} y={y - 9} width={width + 18} height={height + 18} rx="13" fill="none" stroke="#2548E8" strokeWidth="2.5" strokeDasharray="4 3" />}
+              {selected && <rect data-editor-only="selection" x={x - 4} y={y - 4} width={width + 8} height={height + 8} rx={event ? r + 4 : 12} fill="none" stroke={diagramColor("accent")} strokeOpacity="0.14" strokeWidth="6" />}
+              {isTarget && <rect data-editor-only="connection-target" x={x - 9} y={y - 9} width={width + 18} height={height + 18} rx="13" fill="none" stroke={diagramColor("accent")} strokeWidth="2.5" strokeDasharray="4 3" />}
               {gateway ? <>
                 <path d={`M ${cx} ${y} L ${x + width} ${cy} L ${cx} ${y + height} L ${x} ${cy} Z`} fill={fill} stroke={stroke} strokeWidth="1.8" />
-                {step.type === "or" ? <circle cx={cx} cy={cy} r="11" fill="none" stroke="#FFFFFF" strokeWidth="2.2" /> : <text x={cx} y={cy + 7} textAnchor="middle" fill="#FFFFFF" fontSize={step.type === "and" ? 29 : 24} fontWeight="500">{step.type === "and" ? "+" : "×"}</text>}
+                {step.type === "or" ? <circle cx={cx} cy={cy} r="11" fill="none" stroke={diagramColor("on-gateway")} strokeWidth="2.2" /> : <text x={cx} y={cy + 7} textAnchor="middle" fill={diagramColor("on-gateway")} fontSize={step.type === "and" ? 29 : 24} fontWeight="500">{step.type === "and" ? "+" : "×"}</text>}
                 <TextLines text={step.title} x={cx} y={y + height + 23} width={130} maxLines={2} size={11} />
               </> : event ? <>
                 <circle cx={cx} cy={cy} r={r - 1} fill={fill} stroke={stroke} strokeWidth={step.type === "end" ? 4 : 1.8} />
                 {["intermediate", "message", "timer"].includes(step.type) && <circle cx={cx} cy={cy} r={r - 6} fill="none" stroke={stroke} strokeWidth="1" />}
-                {step.type === "message" && <g stroke="#566270" strokeWidth="1.4" fill="none"><rect x={cx - 11} y={cy - 7} width="22" height="14" rx="1" /><path d={`M ${cx - 11} ${cy - 7} L ${cx} ${cy + 1} L ${cx + 11} ${cy - 7}`} /></g>}
-                {step.type === "timer" && <g stroke="#566270" strokeWidth="1.4" fill="none"><circle cx={cx} cy={cy} r="12" /><path d={`M ${cx} ${cy - 8} V ${cy} L ${cx + 6} ${cy + 4}`} />{[0, 1, 2, 3].map((tick) => <line key={tick} x1={cx} y1={cy - 12} x2={cx} y2={cy - 9} transform={`rotate(${tick * 90} ${cx} ${cy})`} />)}</g>}
+                {step.type === "message" && <g stroke={diagramColor("muted")} strokeWidth="1.4" fill="none"><rect x={cx - 11} y={cy - 7} width="22" height="14" rx="1" /><path d={`M ${cx - 11} ${cy - 7} L ${cx} ${cy + 1} L ${cx + 11} ${cy - 7}`} /></g>}
+                {step.type === "timer" && <g stroke={diagramColor("muted")} strokeWidth="1.4" fill="none"><circle cx={cx} cy={cy} r="12" /><path d={`M ${cx} ${cy - 8} V ${cy} L ${cx + 6} ${cy + 4}`} />{[0, 1, 2, 3].map((tick) => <line key={tick} x1={cx} y1={cy - 12} x2={cx} y2={cy - 9} transform={`rotate(${tick * 90} ${cx} ${cy})`} />)}</g>}
                 <TextLines text={step.title} x={cx} y={y + height + 22} width={120} maxLines={2} size={11} />
               </> : step.type === "data" ? <>
-                <path d={`M ${x} ${y} H ${x + width - 17} L ${x + width} ${y + 17} V ${y + height} H ${x} Z M ${x + width - 17} ${y} V ${y + 17} H ${x + width}`} fill="#FFFFFF" stroke="#BAC4CF" strokeWidth="1.7" />
+                <path d={`M ${x} ${y} H ${x + width - 17} L ${x + width} ${y + 17} V ${y + height} H ${x} Z M ${x + width - 17} ${y} V ${y + 17} H ${x + width}`} fill={diagramColor("node")} stroke={diagramColor("shape-border")} strokeWidth="1.7" />
                 <TextLines text={step.title} x={cx} y={cy + 4} width={width - 24} maxLines={4} />
               </> : step.type === "annotation" ? <>
                 <rect x={x} y={y} width={width} height={height} fill={fill} />
-                <path d={`M ${x + 12} ${y} H ${x} V ${y + height} H ${x + 12}`} stroke="#8A96A3" strokeWidth="2" fill="none" />
-                <TextLines text={step.title} x={cx + 3} y={cy + 4} width={width - 24} maxLines={4} size={11} color="#566270" />
+                <path d={`M ${x + 12} ${y} H ${x} V ${y + height} H ${x + 12}`} stroke={diagramColor("annotation")} strokeWidth="2" fill="none" />
+                <TextLines text={step.title} x={cx + 3} y={cy + 4} width={width - 24} maxLines={4} size={11} color={diagramColor("muted")} />
               </> : <>
                 <rect x={x} y={y} width={width} height={height} rx="9" fill={fill} stroke={stroke} strokeWidth="1.6" />
-                {step.type === "userTask" && <g transform={`translate(${x + 13} ${y + 11})`} stroke="#566270" strokeWidth="1.4" fill="none"><circle cx="4" cy="3" r="2.5" /><path d="M 0 11 V 9 Q 0 6 4 6 Q 8 6 8 9 V 11" /></g>}
-                {step.type === "serviceTask" && <g transform={`translate(${x + 17} ${y + 16})`} stroke="#566270" strokeWidth="1.4" fill="none"><circle r="5" /><circle r="1.8" />{[0, 1, 2, 3].map((tick) => <line key={tick} x1="0" y1="-8" x2="0" y2="-5" transform={`rotate(${tick * 90})`} />)}</g>}
+                {step.type === "userTask" && <g transform={`translate(${x + 13} ${y + 11})`} stroke={diagramColor("muted")} strokeWidth="1.4" fill="none"><circle cx="4" cy="3" r="2.5" /><path d="M 0 11 V 9 Q 0 6 4 6 Q 8 6 8 9 V 11" /></g>}
+                {step.type === "serviceTask" && <g transform={`translate(${x + 17} ${y + 16})`} stroke={diagramColor("muted")} strokeWidth="1.4" fill="none"><circle r="5" /><circle r="1.8" />{[0, 1, 2, 3].map((tick) => <line key={tick} x1="0" y1="-8" x2="0" y2="-5" transform={`rotate(${tick * 90})`} />)}</g>}
                 <TextLines text={step.title} x={cx} y={cy + (step.type === "subprocess" ? -1 : 4)} width={width - 26} maxLines={step.type === "subprocess" ? 3 : 4} />
-                {step.type === "subprocess" && <g><rect x={cx - 6} y={y + height - 17} width="12" height="12" rx="1" fill="#FFFFFF" stroke="#566270" /><path d={`M ${cx - 3} ${y + height - 11} H ${cx + 3} M ${cx} ${y + height - 14} V ${y + height - 8}`} fill="none" stroke="#566270" strokeWidth="1.2" /></g>}
+                {step.type === "subprocess" && <g><rect x={cx - 6} y={y + height - 17} width="12" height="12" rx="1" fill={diagramColor("node")} stroke={diagramColor("muted")} /><path d={`M ${cx - 3} ${y + height - 11} H ${cx + 3} M ${cx} ${y + height - 14} V ${y + height - 8}`} fill="none" stroke={diagramColor("muted")} strokeWidth="1.2" /></g>}
               </>}
               <g className="diagram-step-number" pointerEvents="none">
-                <rect x={x - 5} y={y - 15} width={stepNumber.length > 2 ? 27 : 22} height="17" rx="5" fill={selected ? "#2548E8" : "#EEF1F4"} stroke={selected ? "#2548E8" : "#D5DBE2"} strokeWidth="0.8" />
-                <text x={x + (stepNumber.length > 2 ? 8.5 : 6)} y={y - 3} textAnchor="middle" fill={selected ? "#FFFFFF" : "#566270"} fontFamily="'DM Mono', monospace" fontSize="10" fontWeight="500">{stepNumber}</text>
+                <rect x={x - 5} y={y - 15} width={stepNumber.length > 2 ? 27 : 22} height="17" rx="5" fill={selected ? diagramColor("accent") : diagramColor("badge")} stroke={selected ? diagramColor("accent") : diagramColor("border")} strokeWidth="0.8" />
+                <text x={x + (stepNumber.length > 2 ? 8.5 : 6)} y={y - 3} textAnchor="middle" fill={selected ? diagramColor("on-accent") : diagramColor("muted")} fontFamily="'DM Mono', monospace" fontSize="10" fontWeight="500">{stepNumber}</text>
               </g>
               </g>
               {selected && !selectedRoute && onConnect && step.type !== "end" && activeTool !== "pan" && <g className="diagram-connection-handle" data-editor-only="connection-handle" data-connection-handle={node.id} role="button" tabIndex={0} aria-label={`Keçid çək: ${step.title || "Adsız addım"}`} aria-pressed={connectionSource === node.id} style={{ touchAction: "none" }}
@@ -739,8 +740,8 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
                   }
                 }}>
                 <title>Digər fiqura sürüşdür və ya kliklə hədəfi seç.</title>
-                <circle cx={x + width + 14} cy={cy} r="11" fill="#2548E8" stroke="#FFFFFF" strokeWidth="2" />
-                <path d={`M ${x + width + 10} ${cy} H ${x + width + 18} M ${x + width + 14} ${cy - 4} V ${cy + 4}`} fill="none" stroke="#FFFFFF" strokeWidth="1.7" pointerEvents="none" />
+                <circle cx={x + width + 14} cy={cy} r="11" fill={diagramColor("accent")} stroke={diagramColor("on-accent")} strokeWidth="2" />
+                <path d={`M ${x + width + 10} ${cy} H ${x + width + 18} M ${x + width + 14} ${cy - 4} V ${cy + 4}`} fill="none" stroke={diagramColor("on-accent")} strokeWidth="1.7" pointerEvents="none" />
               </g>}
             </g>;
           })}
@@ -750,7 +751,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
             const start = reconnectPreview.endpoint === "source" ? reconnectPreview.point : edge.points[0];
             const end = reconnectPreview.endpoint === "target" ? reconnectPreview.point : edge.points[edge.points.length - 1];
             const middleX = (start.x + end.x) / 2;
-            return <path className="diagram-reconnect-preview" data-editor-only="reconnect-preview" d={`M ${start.x} ${start.y} H ${middleX} V ${end.y} H ${end.x}`} fill="none" stroke="#2548E8" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />;
+            return <path className="diagram-reconnect-preview" data-editor-only="reconnect-preview" d={`M ${start.x} ${start.y} H ${middleX} V ${end.y} H ${end.x}`} fill="none" stroke={diagramColor("accent")} strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />;
           })()}
           {selectedEdge && selectedRoute && onReconnectRoute && activeTool !== "pan" && (["source", "target"] as const).map((endpoint) => {
             const point = endpoint === "source" ? selectedEdge.points[0] : selectedEdge.points[selectedEdge.points.length - 1];
@@ -773,12 +774,12 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
               }}>
               <title>{endpoint === "source" ? "Keçidin başlanğıcını" : "Keçidin hədəfini"} başqa fiqura sürüşdür və ya klikləyib fiqur seç. Etiket və izah saxlanılır.</title>
               <circle cx={point.x} cy={point.y} r={14 / zoom} fill="transparent" />
-              <circle cx={point.x} cy={point.y} r={7 / zoom} fill={active ? "#2548E8" : "#FFFFFF"} stroke="#2548E8" strokeWidth={2 / zoom} />
+              <circle cx={point.x} cy={point.y} r={7 / zoom} fill={active ? diagramColor("accent") : diagramColor("surface")} stroke={diagramColor("accent")} strokeWidth={2 / zoom} />
             </g>;
           })}
           {!layout.nodes.length && <g>
-            <text x={diagramWidth / 2} y={diagramHeight / 2 - 8} textAnchor="middle" fill="#14181D" fontSize="16" fontWeight="600">İlk addımını əlavə et</text>
-            <text x={diagramWidth / 2} y={diagramHeight / 2 + 20} textAnchor="middle" fill="#566270" fontSize="12">Formanı doldurduqca diaqram burada yaranacaq.</text>
+            <text x={diagramWidth / 2} y={diagramHeight / 2 - 8} textAnchor="middle" fill={diagramColor("ink")} fontSize="16" fontWeight="600">İlk addımını əlavə et</text>
+            <text x={diagramWidth / 2} y={diagramHeight / 2 + 20} textAnchor="middle" fill={diagramColor("muted")} fontSize="12">Formanı doldurduqca diaqram burada yaranacaq.</text>
           </g>}
         </svg>
       </div>

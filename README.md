@@ -1,6 +1,6 @@
 # VisioFlow
 
-Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevirən veb alət. Seçilmiş iş masası yerləşməsində yumşaq qaranlıq forma solda, ağ fondakı nöqtəli diaqram sahəsi sağda yerləşir. Next.js və React ilə hazırlanıb; Vercel-də yerləşdirilə bilər.
+Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevirən veb alət. Seçilmiş iş masası yerləşməsində yumşaq qaranlıq forma solda, qaranlıq fondakı nöqtəli diaqram sahəsi sağda yerləşir. Next.js və React ilə hazırlanıb; Vercel-də yerləşdirilə bilər.
 
 ## İş ardıcıllığı
 
@@ -12,7 +12,7 @@ Azərbaycan dilində, formaya daxil edilən iş axınını canlı diaqrama çevi
 
 Addım kartındakı yuxarı/aşağı düymələri forma sırasını dəyişir. **Bu addımdan sonra əlavə et** tək çıxışı olan addımın ardına yeni tapşırıq qoşur; mövcud keçidin şərti və izahı qorunur. Bir neçə qol varsa yeni tapşırıq yaradılır, hansı qola qoşulacağını keçid formasında seçirsən. **Axın ardıcıllığı üzrə nömrələ** başlanğıcdan BFS ilə yolları izləyir, dövrləri təkrar saymır, əlaqəsiz addım və qeydləri sonunda saxlayır. Forma, diaqram, Word və Visio eyni sıra və qol nömrələrindən istifadə edir; əl ilə yerləşdirilmiş fiqurların mövqeyi dəyişmir.
 
-**Nümunə proses** menyusunda “Müştəri müraciətləri” ilə yanaşı **Təsdiq prosesi**, **Sorğu-cavab** və **İşə qəbul** şablonları var. Hər açılış yeni layihə yaradır, əvvəlki saxlanmış iş öz hash ünvanında qalır. Layihə menyusundakı **SVG kimi yüklə** və **PNG kimi yüklə** bütün diaqramı şəkil kimi çıxarır. Azərbaycan hərfləri üçün yerli DM Sans/DM Mono şriftləri SVG-yə daxil edilir; redaktə tutacaqları və seçim vurğuları ixrac edilmir. PNG böyük diaqramlarda maksimum 16 milyon piksel və 8192 piksel tərəf həddində yaradılır.
+**Nümunə proses** menyusunda “Müştəri müraciətləri” ilə yanaşı **Təsdiq prosesi**, **Sorğu-cavab** və **İşə qəbul** şablonları var. Hər açılış yeni layihə yaradır, əvvəlki saxlanmış iş öz hash ünvanında qalır. Layihə menyusundakı **SVG kimi yüklə** və **PNG kimi yüklə** bütün diaqramı şəkil kimi çıxarır. Azərbaycan hərfləri üçün yerli DM Sans/DM Mono şriftləri SVG-yə daxil edilir; redaktə tutacaqları və seçim vurğuları ixrac edilmir. PNG böyük diaqramlarda maksimum 16 milyon piksel və 8192 piksel tərəf həddində yaradılır. Ekrandakı qaranlıq tema yalnız redaktora aiddir; SVG/PNG faylları ağ fon və oxunaqlı açıq palitra ilə hazırlanır.
 
 Addımın formasında və diaqram redaktə panelində **Əlavə məlumatlar** bölməsi var: **Müddət (SLA)**, **Sistem**, **Sənəd**. Bunlar istəyə bağlı mətn sahələridir; boş saxlananda köhnə layihənin davranışı dəyişmir. SLA üçün məsələn “2 iş günü” yazmaq olar; sahə prosesin vaxtını avtomatik ölçmür. Doldurulmuş məlumatlar izahda və VSDX fiqurunun Shape Data hissəsində görünür. **İzah** bölməsində seçdiyin məlumatlar Word və önbaxış cədvəlində ayrıca sütun olur; seçilməyən məlumatlar təsvirin içində qalır. Sütun seçimi cari açıq sessiyaya aiddir.
 
@@ -80,7 +80,7 @@ Word sənədi ayrıca Office Open XML paketidir; həqiqi cədvəl, təkrarlanan 
 
 ## İnterfeys nümunələri
 
-Ana səhifədə D iş masası yerləşməsi işləyir: başlıq və sol forma qaranlıq, sağdakı diaqram ağdır. Sahələr, fokus, seçim, xəta və uğur rəngləri hər fon üçün ayrıca seçilib. [Əvvəlki rəng variantının görünüşü](public/design-previews/design-d.png).
+Ana səhifədə D iş masası yerləşməsi işləyir: başlıq, sol forma və sağdakı diaqram qaranlıqdır. Sahələr, fokus, seçim, xəta və uğur rəngləri hər fon üçün ayrıca seçilib. [Əvvəlki rəng variantının görünüşü](public/design-previews/design-d.png).
 
 Lokal inkişaf rejimində `/designs` səhifəsində üç qaranlıq interfeys variantına baxmaq olar: **A — Addım-addım forma**, **B — Diaqram mərkəzdə**, **C — Cədvəldən diaqrama**. Production-da bu səhifə 404 qaytarır və menyuda göstərilmir. Nümunələr görünüşü müqayisə etmək üçündür; səhifə mövcud layihəni dəyişmir. İşlək redaktor ana səhifədədir.
 

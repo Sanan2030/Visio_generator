@@ -1,4 +1,5 @@
 import type { Project, StepType } from "./types";
+import { resolveDiagramColor } from "./diagram-palette";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const FONT_FAMILIES = new Set(["DM Sans", "DM Mono"]);
@@ -129,6 +130,15 @@ function removeEditorState(clone: SVGSVGElement, project: Project) {
   }
 }
 
+function applyLightExportPalette(clone: SVGSVGElement) {
+  for (const element of [clone, ...clone.querySelectorAll("*")]) {
+    for (const attribute of ["fill", "stroke"]) {
+      const value = element.getAttribute(attribute);
+      if (value) element.setAttribute(attribute, resolveDiagramColor(value));
+    }
+  }
+}
+
 async function diagramBlob(svg: SVGSVGElement, project: Project, rasterSize?: { width: number; height: number }): Promise<Blob> {
   const { width, height } = rasterSize ?? viewBoxSize(svg);
   const clone = svg.cloneNode(true) as SVGSVGElement;
@@ -138,6 +148,7 @@ async function diagramBlob(svg: SVGSVGElement, project: Project, rasterSize?: { 
   clone.setAttribute("role", "img");
   clone.style.removeProperty("width");
   clone.style.removeProperty("height");
+  applyLightExportPalette(clone);
   removeEditorState(clone, project);
   clone.querySelector(":scope > rect")?.setAttribute("fill", "#FFFFFF");
   const title = clone.querySelector(".diagram-project-title");

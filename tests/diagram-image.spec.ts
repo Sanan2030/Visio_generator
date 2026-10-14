@@ -58,6 +58,10 @@ test("SVG download preserves complete vector geometry and Azerbaijani fonts with
   await task.click();
   await expect(task).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#process-diagram [data-editor-only]")).not.toHaveCount(0);
+  // Presentation tokens inherit the dark editor theme, but the exported file
+  // must stay readable independently of this page and its stylesheets.
+  await expect(task.locator(":scope > rect:not([data-editor-only])").first()).toHaveAttribute("fill", "var(--diagram-node, #FFFFFF)");
+  expect(await task.locator(":scope > rect:not([data-editor-only])").first().evaluate(element => getComputedStyle(element).fill)).not.toBe("rgb(255, 255, 255)");
   const before = await editorSnapshot(page);
   const text = (await exportImage(page, "SVG")).toString("utf8");
   expect(XMLValidator.validate(text)).toBe(true);
@@ -74,6 +78,9 @@ test("SVG download preserves complete vector geometry and Azerbaijani fonts with
       fonts: svg.querySelector("defs style")?.textContent ?? "",
       text: svg.textContent,
       background: svg.querySelector(":scope > rect")?.getAttribute("fill"),
+      shapeFill: node?.querySelector(":scope > rect")?.getAttribute("fill"),
+      projectInk: svg.querySelector(".diagram-project-title")?.getAttribute("fill"),
+      themeTokens: [...svg.querySelectorAll("[fill], [stroke]")].some(element => [element.getAttribute("fill"), element.getAttribute("stroke")].some(value => value?.includes("var("))),
     };
   }, text);
   expect(exported.width).toBe(before.width);
@@ -82,6 +89,9 @@ test("SVG download preserves complete vector geometry and Azerbaijani fonts with
   expect(exported.nodes).toBe(4);
   expect(exported.editorOnly).toBe(0);
   expect(exported.shapeStroke).toBe("#BAC4CF");
+  expect(exported.shapeFill).toBe("#FFFFFF");
+  expect(exported.projectInk).toBe("#14181D");
+  expect(exported.themeTokens).toBe(false);
   expect(exported.numberFill).toBe("#EEF1F4");
   expect(exported.background).toBe("#FFFFFF");
   expect(exported.fonts).toContain("DM Sans");
