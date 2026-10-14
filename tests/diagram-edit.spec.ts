@@ -189,7 +189,7 @@ test("the connection handle creates a targeted route and the route editor can de
   const handle = page.locator('#process-diagram [data-connection-handle="start-request"]');
   await expect(handle).toBeVisible();
   await handle.click();
-  await expect(page.locator(".diagram-editor-hint")).toContainText("digər addımı seç");
+  await expect(handle).toHaveAttribute("aria-pressed", "true");
   await node(page, "approve-request").click();
   const connected = await savedProject(page);
   expect(connected.steps[0].routes).toEqual([...original.steps[0].routes, { targetId: "approve-request", label: "", description: "" }]);

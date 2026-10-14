@@ -95,9 +95,18 @@ function idValue(value: unknown): value is string {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 }
 
+function sizeValue(value: unknown): boolean {
+  return value === undefined || (record(value)
+    && typeof value.width === "number" && Number.isFinite(value.width)
+    && typeof value.height === "number" && Number.isFinite(value.height)
+    && value.width > 0 && value.height > 0
+    && value.width <= MAX_STEP_POSITION && value.height <= MAX_STEP_POSITION);
+}
+
 /** Shape validation permits unfinished drafts, while bounding imported data. */
 export function isProject(input: unknown): input is Project {
   if (!record(input) || input.version !== 1 || !idValue(input.id) || !textValue(input.name, 300)
+    || !sizeValue(input.size)
     || !Array.isArray(input.pools) || input.pools.length > 8
     || !Array.isArray(input.steps) || input.steps.length > 200) return false;
   const ids = new Set<string>();
@@ -109,6 +118,7 @@ export function isProject(input: unknown): input is Project {
   };
   for (const pool of input.pools) {
     if (!record(pool) || !addId(pool.id) || !textValue(pool.name, 300)
+      || !sizeValue(pool.size)
       || !Array.isArray(pool.lanes) || pool.lanes.length > 20) return false;
     laneCount += pool.lanes.length;
     if (laneCount > 160) return false;
@@ -118,6 +128,7 @@ export function isProject(input: unknown): input is Project {
   }
   for (const step of input.steps) {
     if (!record(step) || !addId(step.id) || !idValue(step.laneId) || typeof step.type !== "string" || !TYPES.has(step.type)
+      || !sizeValue(step.size)
       || !textValue(step.title, 500) || !textValue(step.description, 20000)
       || !Array.isArray(step.routes) || step.routes.length > 200) return false;
     if (STEP_METADATA_FIELDS.some(field => step[field.key] !== undefined && !textValue(step[field.key], field.maxLength))) return false;

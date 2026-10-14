@@ -26,6 +26,12 @@ export interface StepPosition {
   y: number;
 }
 
+/** Physical diagram pixels; optional in version 1 drafts created before resizing. */
+export interface DiagramSize {
+  width: number;
+  height: number;
+}
+
 export type StepMetadataKey = "duration" | "system" | "document";
 
 /** Shared form, validation and export definitions; existing drafts omit these fields. */
@@ -43,6 +49,7 @@ export interface Step {
   description: string;
   routes: Route[];
   position?: StepPosition;
+  size?: DiagramSize;
   duration?: string;
   system?: string;
   document?: string;
@@ -57,6 +64,7 @@ export interface Pool {
   id: string;
   name: string;
   lanes: Lane[];
+  size?: DiagramSize;
 }
 
 export interface Project {
@@ -65,6 +73,7 @@ export interface Project {
   name: string;
   pools: Pool[];
   steps: Step[];
+  size?: DiagramSize;
 }
 
 export interface ValidationIssue {

@@ -109,8 +109,6 @@ test("the workspace presents a readable dark form and full-height dark diagram w
     const form = getComputedStyle(panel);
     const input = getComputedStyle(panel.querySelector("input")!);
     const canvas = getComputedStyle(document.querySelector(".diagram-viewport")!);
-    const canvasHeading = getComputedStyle(document.querySelector(".canvas-title h2")!);
-    const canvasStats = getComputedStyle(document.querySelector(".canvas-stats")!);
     const canvasProjectTitle = getComputedStyle(document.querySelector(".diagram-project-title")!);
     const controls = getComputedStyle(document.querySelector(".diagram-controls")!);
     const zoomControl = getComputedStyle(document.querySelector("button[aria-label='Diaqramı kiçilt']")!);
@@ -120,8 +118,6 @@ test("the workspace presents a readable dark form and full-height dark diagram w
       canvasLuminance: luminance(canvas.backgroundColor),
       formContrast: contrast(form.color, form.backgroundColor),
       inputContrast: contrast(input.color, input.backgroundColor),
-      canvasHeadingContrast: contrast(canvasHeading.color, canvas.backgroundColor),
-      canvasStatsContrast: contrast(canvasStats.color, canvas.backgroundColor),
       canvasProjectTitleContrast: contrast(canvasProjectTitle.fill, canvas.backgroundColor),
       canvasControlContrast: contrast(zoomControl.color, controls.backgroundColor),
       canvasZoomContrast: contrast(zoomText.color, controls.backgroundColor),
@@ -131,8 +127,6 @@ test("the workspace presents a readable dark form and full-height dark diagram w
   expect(colors.canvasLuminance).toBeLessThan(0.1);
   expect(colors.formContrast).toBeGreaterThanOrEqual(4.5);
   expect(colors.inputContrast).toBeGreaterThanOrEqual(4.5);
-  expect(colors.canvasHeadingContrast).toBeGreaterThanOrEqual(4.5);
-  expect(colors.canvasStatsContrast).toBeGreaterThanOrEqual(4.5);
   expect(colors.canvasProjectTitleContrast).toBeGreaterThanOrEqual(4.5);
   expect(colors.canvasControlContrast).toBeGreaterThanOrEqual(4.5);
   expect(colors.canvasZoomContrast).toBeGreaterThanOrEqual(4.5);
@@ -156,7 +150,8 @@ test("form editing builds a connected live flow and restores every field after r
   await expect(page.locator("#process-diagram [data-step-id]")).toHaveCount(0);
   await page.getByLabel("Prosesin adı").fill("Sənəd təsdiqi");
   await page.getByLabel("Pool 1 icraçı 1", { exact: true }).fill("Operator");
-  await page.getByRole("button", { name: "İcraçı əlavə et", exact: true }).click();
+  await page.getByLabel("Pool 1 yeni iştirakçı", { exact: true }).fill("Vizaçı");
+  await page.getByRole("button", { name: "İştirakçı əlavə et", exact: true }).click();
   await page.getByLabel("Pool 1 icraçı 2", { exact: true }).fill("Vizaçı");
   await page.getByRole("button", { name: "Pool sayını artır", exact: true }).click();
   await page.getByLabel("Pool 2 adı", { exact: true }).fill("Tərəfdaş");
@@ -322,7 +317,8 @@ test("unfinished routes survive autosave and become valid after choosing their t
 test("lanes and pools containing steps are protected until the steps move", async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel("Pool 1 icraçı 1", { exact: true }).fill("Operator");
-  await page.getByRole("button", { name: "İcraçı əlavə et", exact: true }).click();
+  await page.getByLabel("Pool 1 yeni iştirakçı", { exact: true }).fill("Vizaçı");
+  await page.getByRole("button", { name: "İştirakçı əlavə et", exact: true }).click();
   await page.getByLabel("Pool 1 icraçı 2", { exact: true }).fill("Vizaçı");
   await page.getByRole("button", { name: "Pool sayını artır", exact: true }).click();
   await page.getByLabel("Pool 2 adı", { exact: true }).fill("Bank");

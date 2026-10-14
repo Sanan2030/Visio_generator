@@ -97,6 +97,32 @@ test("empty drafts never occupy storage and undoing to empty removes the previou
   assert.equal(storage.length, 0);
 });
 
+test("page-only and pool-only size edits persist in otherwise blank drafts and survive startup cleanup", () => {
+  const storage = new MemoryStorage();
+  const page = { ...createProject(), size: { width: 1400, height: 800 } };
+  const pool = createProject();
+  pool.pools[0].size = { width: 700, height: 350 };
+  for (const project of [page, pool]) {
+    assert.equal(hasProjectContent(project), true);
+    persistProject(storage, project);
+    assert.deepEqual(parseProject(storage.getItem(STORAGE_PREFIX + project.id)!), project);
+  }
+  assert.equal(cleanupEmptyProjects(storage), 0);
+  assert.equal(storage.length, 2);
+});
+
+test("undoing size-only edits to a pristine draft removes its storage record without deleting other resized drafts", () => {
+  const storage = new MemoryStorage();
+  const blank = createProject();
+  persistProject(storage, { ...blank, size: { width: 1500, height: 900 } });
+  const other = createProject();
+  other.pools[0].size = { width: 900, height: 500 };
+  persistProject(storage, other);
+  persistProject(storage, blank);
+  assert.equal(storage.getItem(STORAGE_PREFIX + blank.id), null);
+  assert.deepEqual(parseProject(storage.getItem(STORAGE_PREFIX + other.id)!), other);
+});
+
 test("quota and access failures have actionable Azerbaijani messages", () => {
   const project = { ...createProject(), name: "İş axını" };
   assert.throws(() => persistProject({ removeItem() {}, setItem() { throw new DOMException("quota", "QuotaExceededError"); } }, project), /yaddaşı dolub.*Word və ya Visio/s);

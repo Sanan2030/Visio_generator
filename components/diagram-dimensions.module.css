@@ -1,0 +1,63 @@
+.dimensions {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.group {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 14px 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.group legend {
+  max-width: 100%;
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.inputWrap {
+  position: relative;
+  display: block;
+}
+
+.inputWrap input {
+  width: 100%;
+  padding-right: 42px;
+  font-family: var(--mono);
+  appearance: textfield;
+}
+
+.inputWrap input::-webkit-inner-spin-button,
+.inputWrap input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.unit {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.minimumNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}

@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import { layoutProject } from "./layout";
 import { isProject } from "./process";
 import { displayRouteLabel, getStepNumber } from "./step-numbering";
-import { STEP_METADATA_FIELDS, type LayoutEdge, type LayoutNode, type LayoutPoint, type Project, type Step, type StepMetadataKey } from "./types";
+import { STEP_METADATA_FIELDS, type LayoutEdge, type LayoutNode, type LayoutPoint, type Project, type Route, type Step, type StepMetadataKey } from "./types";
 
 const VISIO_NS = "http://schemas.microsoft.com/office/visio/2012/main";
 const REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -106,6 +106,18 @@ function properties(step: Step): string {
   return `<Section N="Property">${values.map(([key, label, value]) => `<Row N="${key}">${cell("Label", label)}${cell("Type", 0)}${cell("Value", value)}</Row>`).join("")}</Section>`;
 }
 
+/** Full editor explanations stay on the native connector even when its visible label is short. */
+function routeProperties(edge: LayoutEdge, route: Route): string {
+  const values: [string, string, string][] = [
+    ["SourceStepId", "Mənbə addımın identifikatoru", edge.sourceId],
+    ["TargetStepId", "Hədəf addımın identifikatoru", edge.targetId],
+    ["RouteLabel", "Keçidin etiketi", route.label],
+    ["RouteDescription", "Keçidin izahı", route.description || ""],
+  ];
+  if (edge.branchNumber) values.push(["BranchNumber", "Qolun nömrəsi", edge.branchNumber]);
+  return `<Section N="Property">${values.map(([key, label, value]) => `<Row N="${key}">${cell("Label", label)}${cell("Type", 0)}${cell("Value", value)}</Row>`).join("")}</Section>`;
+}
+
 function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number, anchors: RelativePoint[], displayText = step.title): string {
   const width = node.width / PIXELS_PER_INCH;
   const height = node.height / PIXELS_PER_INCH;
@@ -188,7 +200,7 @@ function anchorPosition(node: LayoutNode, anchor: number, pageHeight: number, an
   return { x: (node.x + x * node.width) / PIXELS_PER_INCH, y: (pageHeight - node.y - (1 - y) * node.height) / PIXELS_PER_INCH };
 }
 
-function connectorShape(edge: LayoutEdge, id: number, sourceId: number, targetId: number, source: LayoutNode, target: LayoutNode, pageHeight: number, association: boolean, branching: boolean, sourceAnchors: RelativePoint[], targetAnchors: RelativePoint[]): { shape: string; connects: string } {
+function connectorShape(edge: LayoutEdge, id: number, sourceId: number, targetId: number, source: LayoutNode, target: LayoutNode, pageHeight: number, association: boolean, branching: boolean, sourceAnchors: RelativePoint[], targetAnchors: RelativePoint[], route: Route): { shape: string; connects: string } {
   const sourceAnchor = nearestAnchor(source, edge.points[0], sourceAnchors);
   const targetAnchor = nearestAnchor(target, edge.points.at(-1)!, targetAnchors);
   const begin = anchorPosition(source, sourceAnchor, pageHeight, sourceAnchors);
@@ -241,7 +253,7 @@ function connectorShape(edge: LayoutEdge, id: number, sourceId: number, targetId
   // Text is upright, and this position is expressed in the rotated 1-D shape's
   // local coordinates. A local Y offset alone would not mean "above" on the page.
   const labelPoint = { x: (pageLabel.x - begin.x) * cosine + (pageLabel.y - begin.y) * sine, y: -(pageLabel.x - begin.x) * sine + (pageLabel.y - begin.y) * cosine };
-  const shape = `<Shape ID="${id}" Name="${escapeAttribute(edge.label || "Keçid")}" NameU="Connector.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("BeginX", begin.x, endpoint(sourceId, sourceAnchor, "X"))}${cell("BeginY", begin.y, endpoint(sourceId, sourceAnchor, "Y"))}${cell("EndX", end.x, endpoint(targetId, targetAnchor, "X"))}${cell("EndY", end.y, endpoint(targetId, targetAnchor, "Y"))}${cell("PinX", (begin.x + end.x) / 2, "(BeginX+EndX)*0.5")}${cell("PinY", (begin.y + end.y) / 2, "(BeginY+EndY)*0.5")}${cell("Width", length, "SQRT((EndX-BeginX)^2+(EndY-BeginY)^2)")}${cell("Height", 0)}${cell("LocPinX", length / 2, "Width*0.5")}${cell("LocPinY", 0)}${cell("Angle", angle, "ATAN2(EndY-BeginY,EndX-BeginX)")}${cell("ObjType", 2)}${cell("GlueType", 4)}${cell("LineColor", edge.message ? "#8E70BB" : "#617898")}${cell("LineWeight", 0.013889)}${cell("LinePattern", association ? 3 : edge.message ? 2 : 1)}${cell("FillPattern", 0)}${cell("BeginArrow", message ? 20 : 0)}${cell("EndArrow", association ? 0 : edge.message ? 1 : 13)}${cell("EndArrowSize", 2)}${cell("BegTrigger", 0, `Sheet.${sourceId}!EventXFMod`)}${cell("EndTrigger", 0, `Sheet.${targetId}!EventXFMod`)}${cell("TxtPinX", labelPoint.x, `Width*${number(labelPoint.x / length)}`)}${cell("TxtPinY", labelPoint.y)}${cell("TxtWidth", labelWidth)}${cell("TxtHeight", 0.5)}${cell("TxtLocPinX", labelWidth / 2, "TxtWidth*0.5")}${cell("TxtLocPinY", 0.25, "TxtHeight*0.5")}${cell("TxtAngle", -angle, "-Angle")}${characterSection(8)}${geometry}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(edge.label)}</Text></Shape>`;
+  const shape = `<Shape ID="${id}" Name="${escapeAttribute(edge.label || "Keçid")}" NameU="Connector.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("BeginX", begin.x, endpoint(sourceId, sourceAnchor, "X"))}${cell("BeginY", begin.y, endpoint(sourceId, sourceAnchor, "Y"))}${cell("EndX", end.x, endpoint(targetId, targetAnchor, "X"))}${cell("EndY", end.y, endpoint(targetId, targetAnchor, "Y"))}${cell("PinX", (begin.x + end.x) / 2, "(BeginX+EndX)*0.5")}${cell("PinY", (begin.y + end.y) / 2, "(BeginY+EndY)*0.5")}${cell("Width", length, "SQRT((EndX-BeginX)^2+(EndY-BeginY)^2)")}${cell("Height", 0)}${cell("LocPinX", length / 2, "Width*0.5")}${cell("LocPinY", 0)}${cell("Angle", angle, "ATAN2(EndY-BeginY,EndX-BeginX)")}${cell("ObjType", 2)}${cell("GlueType", 4)}${cell("LineColor", edge.message ? "#8E70BB" : "#617898")}${cell("LineWeight", 0.013889)}${cell("LinePattern", association ? 3 : edge.message ? 2 : 1)}${cell("FillPattern", 0)}${cell("BeginArrow", message ? 20 : 0)}${cell("EndArrow", association ? 0 : edge.message ? 1 : 13)}${cell("EndArrowSize", 2)}${cell("BegTrigger", 0, `Sheet.${sourceId}!EventXFMod`)}${cell("EndTrigger", 0, `Sheet.${targetId}!EventXFMod`)}${cell("TxtPinX", labelPoint.x, `Width*${number(labelPoint.x / length)}`)}${cell("TxtPinY", labelPoint.y)}${cell("TxtWidth", labelWidth)}${cell("TxtHeight", 0.5)}${cell("TxtLocPinX", labelWidth / 2, "TxtWidth*0.5")}${cell("TxtLocPinY", 0.25, "TxtHeight*0.5")}${cell("TxtAngle", -angle, "-Angle")}${characterSection(8)}${routeProperties(edge, route)}${geometry}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(edge.label)}</Text></Shape>`;
   const connects = `<Connect FromSheet="${id}" FromCell="BeginX" FromPart="9" ToSheet="${sourceId}" ToCell="Connections.X${sourceAnchor + 1}" ToPart="${100 + sourceAnchor}"/><Connect FromSheet="${id}" FromCell="EndX" FromPart="12" ToSheet="${targetId}" ToCell="Connections.X${targetAnchor + 1}" ToPart="${100 + targetAnchor}"/>`;
   return { shape, connects };
 }
@@ -318,7 +330,7 @@ export async function generateVsdx(project: Project): Promise<Uint8Array> {
     if (!sourceId || !targetId || !source || !target || edge.points.length < 2) continue;
     const association = [steps.get(edge.sourceId)?.type, steps.get(edge.targetId)?.type]
       .some((type) => type === "data" || type === "annotation");
-    const connector = connectorShape({ ...edge, label: displayRouteLabel(project, edge.sourceId, edge.routeIndex) }, nextId++, sourceId, targetId, source, target, layout.height, association, (steps.get(edge.sourceId)?.routes.length ?? 0) > 1, anchorsByNode.get(edge.sourceId)!, anchorsByNode.get(edge.targetId)!);
+    const connector = connectorShape({ ...edge, label: displayRouteLabel(project, edge.sourceId, edge.routeIndex) }, nextId++, sourceId, targetId, source, target, layout.height, association, (steps.get(edge.sourceId)?.routes.length ?? 0) > 1, anchorsByNode.get(edge.sourceId)!, anchorsByNode.get(edge.targetId)!, steps.get(edge.sourceId)!.routes[edge.routeIndex]);
     shapes.push(connector.shape);
     connections.push(connector.connects);
   }

@@ -207,8 +207,24 @@ h1, h2, h3, p { margin: 0; }
 .project-menu button.danger, .project-menu .danger-icon, .project-menu .danger-menu-item { color: var(--danger); }
 .menu-backdrop { position: fixed; inset: 0; background: transparent; cursor: default; z-index: 40; }
 
-.studio-main { display: grid; grid-template-columns: 400px minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; }
-.form-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
+.studio-main { display: grid; grid-template-columns: min(var(--sidebar-width, 400px), max(280px, calc(100vw - 368px))) 8px minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; }
+.form-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); container-type: inline-size; }
+.workspace-separator { position: relative; width: 8px; padding: 0; border: 0; background: #141a22; cursor: col-resize; touch-action: none; }
+.workspace-separator::after { position: absolute; top: calc(50% - 22px); left: 3px; width: 2px; height: 44px; border-radius: 2px; background: #536177; content: ""; }
+.workspace-separator:hover::after, .workspace-separator:focus-visible::after { background: #98b3ff; }
+.workspace-separator:focus-visible { outline: 2px solid #98b3ff; outline-offset: -2px; }
+.lane-creator { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.lane-creator .field-label { margin-bottom: 10px; }
+.lane-creator .secondary-button { width: 100%; }
+.step-creator { margin-bottom: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.step-creator h2 { margin-bottom: 16px; font-size: 15px; font-weight: 600; }
+.step-creator .primary-button { width: 100%; }
+.step-creator .field-label { margin-bottom: 12px; }
+.dimensions-button { border: 1px solid var(--control-line); }
+@container (max-width: 360px) {
+  .step-form .field-row { grid-template-columns: 1fr; gap: 0; }
+  .pool-count { flex-wrap: wrap; }
+}
 .form-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex-shrink: 0; min-height: 52px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .form-tabs button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 15px 4px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .form-tabs button:hover { color: var(--ink); }
@@ -286,6 +302,11 @@ h1, h2, h3, p { margin: 0; }
 .step-summary-text strong { display: block; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .step-card.is-open .step-summary-text strong { font-weight: 700; }
 .step-summary-text small { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 330px) {
+  .step-summary-row { flex-wrap: wrap; }
+  .step-summary { flex-basis: 100%; }
+  .step-summary-row > .icon-button:nth-child(2) { margin-left: auto; }
+}
 .step-type { flex-shrink: 0; color: var(--muted); font-size: 11px; }
 .step-form { padding: 0 16px 16px; }
 .step-form .field-label:last-child { margin-bottom: 0; }
@@ -456,6 +477,9 @@ h1, h2, h3, p { margin: 0; }
 .diagram-viewport:focus-visible { outline-offset: -3px; }
 .diagram-surface { display: grid; place-items: center; min-width: 100%; min-height: 100%; padding: 24px; }
 .diagram-svg { display: block; overflow: visible; font-family: "DM Sans", sans-serif; }
+.diagram-resize-handle, .diagram-insert-handle { touch-action: none; }
+.diagram-resize-handle:hover, .diagram-resize-handle:focus-visible, .diagram-insert-handle:hover, .diagram-insert-handle:focus-visible { filter: brightness(1.25); outline: none; }
+.diagram-operation-hint { position: absolute; bottom: 92px; left: 50%; max-width: calc(100% - 32px); padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--accent); font-size: 12px; transform: translateX(-50%); pointer-events: none; z-index: 7; }
 .diagram-node { cursor: pointer; }
 .diagram-node:focus, .diagram-edge:focus, .diagram-connection-handle:focus, .diagram-route-handle:focus { outline: none; }
 .diagram-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
@@ -537,9 +561,7 @@ h1, h2, h3, p { margin: 0; }
 .spin { animation: spin 1.3s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (min-width: 1181px) {
-  .diagram-panel.has-inspector .diagram-viewport { margin-right: 344px; }
-}
+.preview-panel.is-wide .diagram-panel.has-inspector .diagram-viewport { margin-right: 344px; }
 @media (max-width: 1280px) {
   .header-project { gap: 10px; }
   .project-title-button { max-width: 260px; }
@@ -550,7 +572,6 @@ h1, h2, h3, p { margin: 0; }
 }
 @media (max-width: 1100px) {
   .studio-header { gap: 14px; padding-right: 18px; padding-left: 18px; }
-  .studio-main { grid-template-columns: 360px minmax(0, 1fr); }
   .header-actions { gap: 8px; }
   .save-status > span { display: none; }
   .form-scroll { padding-right: 20px; padding-left: 20px; }
@@ -569,7 +590,6 @@ h1, h2, h3, p { margin: 0; }
   .header-actions .button-label { display: none; }
   .header-actions .text-button { width: 40px; padding: 0; }
   .header-divider { display: none; }
-  .studio-main { grid-template-columns: 340px minmax(0, 1fr); }
   .form-scroll { padding-right: 16px; padding-left: 16px; }
   .form-footer { padding-right: 16px; padding-left: 16px; }
   .diagram-toolbar { right: 16px; }
@@ -588,6 +608,7 @@ h1, h2, h3, p { margin: 0; }
   .header-actions .primary-button, .header-actions .secondary-button { padding: 0 12px; }
   .save-status { display: none; }
   .studio-main { display: flex; flex-direction: column; overflow: visible; }
+  .workspace-separator { display: none; }
   .form-panel { overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
   .form-tabs { padding-right: 16px; padding-left: 16px; }
   .form-scroll { width: 100%; max-width: 580px; margin: 0 auto; padding: 20px 24px 24px; overflow: visible; }
