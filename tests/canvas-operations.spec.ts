@@ -179,7 +179,7 @@ test("a task can move to another participant at changed zoom and actor changes r
   expect(await savedProject(page)).toEqual(moved);
 });
 
-test("Escape and a drop outside every participant cancel a cross-lane move without recording undo", async ({ page }) => {
+test("Escape and a drop outside the canvas cancel a cross-lane move without recording undo", async ({ page }) => {
   const original = await seedProject(page);
   const layout = layoutProject(original);
   const lane = layout.lanes.find(item => item.id === "reviewer")!;

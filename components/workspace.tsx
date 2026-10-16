@@ -5,7 +5,7 @@ import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, Check, Chev
 import { STEP_METADATA_FIELDS, type DiagramSize, type Step, type StepMetadataKey, type StepType } from "@/lib/types";
 import { createId, createProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
 import { clampNodePosition } from "@/lib/layout";
-import { duplicateDiagramStep, moveDiagramStep, reconnectDiagramRoute } from "@/lib/diagram-edit";
+import { assignDiagramStep, duplicateDiagramStep, moveDiagramPool, moveDiagramStep, reconnectDiagramRoute } from "@/lib/diagram-edit";
 import { insertDiagramStepOnRoute, moveDiagramStepOnRoute, type DiagramInsertionResult } from "@/lib/diagram-splice";
 import { resizeProjectCanvas, resizeDiagramPool, resizeDiagramStep } from "@/lib/diagram-size";
 import { getRouteNumber } from "@/lib/step-numbering";
@@ -49,7 +49,7 @@ export default function Workspace() {
   const [participantNames, setParticipantNames] = useState<Record<string, string>>({});
   const [newStepName, setNewStepName] = useState("");
   const [newStepType, setNewStepType] = useState<StepType>("task");
-  const [newStepLane, setNewStepLane] = useState("");
+  const [newStepLane, setNewStepLane] = useState("__default");
   const newStepInput = useRef<HTMLInputElement>(null);
   const skipStepScroll = useRef(false);
   const formScroll = useRef<HTMLDivElement>(null);
@@ -146,7 +146,8 @@ export default function Workspace() {
     update(current => {
       const existing = current.steps.find(step => step.id === id);
       if (!existing || fields.every(field => Object.is(existing[field as keyof Step], patch[field as keyof Step]))) return current;
-      return { ...current, steps: current.steps.map(step => step.id === id ? { ...step, ...patch } : step) };
+      const assigned = patch.laneId !== undefined && patch.laneId !== existing.laneId ? assignDiagramStep(current, id, patch.laneId) : current;
+      return { ...assigned, steps: assigned.steps.map(step => step.id === id ? { ...step, ...patch } : step) };
     }, historyKey ?? (textField ? `step:${id}:${fields[0]}` : undefined));
   }
 
@@ -180,12 +181,12 @@ export default function Workspace() {
   }
 
   function moveStep(id: string, position: { x: number; y: number }, laneId?: string, insertion?: DiagramRouteSelection) {
-    const bounded = clampNodePosition(position);
+    const bounded = clampNodePosition(position, (laneId ?? project.steps.find(step => step.id === id)?.laneId) === "");
     if (insertion) {
       let result: DiagramInsertionResult | undefined;
       update(current => {
         const destination = laneId ?? current.steps.find(step => step.id === id)?.laneId;
-        result = moveDiagramStepOnRoute(current, id, insertion, destination ? { laneId: destination, position: bounded } : undefined);
+        result = moveDiagramStepOnRoute(current, id, insertion, destination !== undefined ? { laneId: destination, position: bounded } : undefined);
         return result.project;
       });
       if (result?.error) setNotice(result.error);
@@ -212,8 +213,8 @@ export default function Workspace() {
   }
 
   function placeShape(type: StepType, position: { x: number; y: number }, laneId: string): boolean {
-    if (project.steps.length >= 200 || !lanes.some(lane => lane.id === laneId)) return false;
-    const step: Step = { id: createId(), laneId, type, title: type === "start" ? "Başlanğıc" : type === "end" ? "Son" : "Yeni addım", description: "", routes: [], position: clampNodePosition(position) };
+    if (project.steps.length >= 200 || (laneId !== "" && !lanes.some(lane => lane.id === laneId))) return false;
+    const step: Step = { id: createId(), laneId, type, title: type === "start" ? "Başlanğıc" : type === "end" ? "Son" : "Yeni addım", description: "", routes: [], position: clampNodePosition(position, laneId === "") };
     update(current => ({ ...current, steps: [...current.steps, step] }));
     selectStep(step.id);
     setInspectorStep(null);
@@ -274,7 +275,10 @@ export default function Workspace() {
   }
 
   function resetLayout() {
-    update(current => current.steps.some(step => step.position) ? { ...current, steps: current.steps.map(({ position, ...step }) => { void position; return step; }) } : current);
+    update(current => ({ ...current,
+      pools: current.pools.map(({ position, ...pool }) => { void position; return pool; }),
+      steps: current.steps.map(({ position, ...step }) => { void position; return step; }),
+    }));
   }
 
   function connectSteps(sourceId: string, targetId: string) {
@@ -345,10 +349,9 @@ export default function Workspace() {
   }
 
   function addStep(type: StepType = "task", openInspector = false, details?: { title?: string; laneId?: string; fromComposer?: boolean }) {
-    if (!lanes.length) { setNotice("Əvvəl ən azı bir icraçı əlavə et."); setTab("people"); return; }
     if (project.steps.length >= 200) { setNotice("Bir layihədə maksimum 200 addım ola bilər."); return; }
     const step: Step = {
-      id: createId(), laneId: details?.laneId && lanes.some(lane=>lane.id===details.laneId) ? details.laneId : project.steps.find(item => item.id === selected)?.laneId ?? lanes[0].id, type,
+      id: createId(), laneId: details?.laneId !== undefined && (details.laneId === "" || lanes.some(lane=>lane.id===details.laneId)) ? details.laneId : project.steps.find(item => item.id === selected)?.laneId ?? lanes[0]?.id ?? "", type,
       title: details?.title?.trim() || (type === "start" ? "Başlanğıc" : type === "end" ? "Son" : "Yeni addım"),
       description: "", routes: [],
     };
@@ -505,12 +508,12 @@ export default function Workspace() {
 
           {tab === "steps" && <div className="steps-form">
             {!project.steps.length && <div className="empty-steps"><button type="button" className="primary-button" disabled={!ready || !lanes.length} onClick={()=>addStep("start")}><Plus size={15}/> Başlanğıc əlavə et</button></div>}
-            <form className="step-creator" onSubmit={event=>{event.preventDefault();addStep(newStepType,false,{title:newStepName,laneId:newStepLane || lanes[0]?.id,fromComposer:true});}}>
+            <form className="step-creator" onSubmit={event=>{event.preventDefault();addStep(newStepType,false,{title:newStepName,laneId:newStepLane === "__default" ? lanes[0]?.id ?? "" : newStepLane,fromComposer:true});}}>
               <h2>Yeni addım</h2>
               <label className="field-label">Addımın adı<input ref={newStepInput} aria-label="Yeni addımın adı" maxLength={240} placeholder="Məsələn, Sənədi yoxla" value={newStepName} onChange={event=>setNewStepName(event.target.value)}/></label>
               <label className="field-label">Element növü<select aria-label="Yeni addımın növü" value={newStepType} onChange={event=>setNewStepType(event.target.value as StepType)}>{STEP_TYPES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-              <label className="field-label">İştirakçı<select aria-label="Yeni addımın icraçısı" value={lanes.some(lane=>lane.id===newStepLane)?newStepLane:lanes[0]?.id??""} onChange={event=>setNewStepLane(event.target.value)}>{lanes.map(lane=><option key={lane.id} value={lane.id}>{project.pools.length>1?`${lane.poolName} / `:""}{lane.name}</option>)}</select></label>
-              <button type="submit" className="primary-button" aria-label="Addım əlavə et" disabled={!ready || !lanes.length || project.steps.length>=200}><Plus size={15}/> Addım əlavə et</button>
+              <label className="field-label">İştirakçı<select aria-label="Yeni addımın icraçısı" value={newStepLane === "" || lanes.some(lane=>lane.id===newStepLane)?newStepLane:lanes[0]?.id??""} onChange={event=>setNewStepLane(event.target.value)}><option value="">Pool-dan kənar</option>{lanes.map(lane=><option key={lane.id} value={lane.id}>{project.pools.length>1?`${lane.poolName} / `:""}{lane.name}</option>)}</select></label>
+              <button type="submit" className="primary-button" aria-label="Addım əlavə et" disabled={!ready || project.steps.length>=200}><Plus size={15}/> Addım əlavə et</button>
             </form>
             <div className="step-list">
               {project.steps.map((step,index) => {
@@ -521,11 +524,11 @@ export default function Workspace() {
                 const lane = lanes.find(item=>item.id===step.laneId);
                 return <article className={`step-card ${open ? "is-open" : ""}`} key={step.id} id={`step-form-${step.id}`}>
                   <div className="step-summary-row">
-                    <button type="button" className="step-summary" title={`${step.title||"Adsız addım"} — ${lane?.name||"İcraçı seçilməyib"}`} aria-label={`${index+1}-ci addımı aç`} aria-expanded={open} aria-controls={`step-fields-${step.id}`} onClick={()=>{
+                    <button type="button" className="step-summary" title={`${step.title||"Adsız addım"} — ${lane?.name||(step.laneId === "" ? "Pool-dan kənar" : "İcraçı seçilməyib")}`} aria-label={`${index+1}-ci addımı aç`} aria-expanded={open} aria-controls={`step-fields-${step.id}`} onClick={()=>{
                       if (open) { setSelected(null); setSelectedRoute(null); setRouteEditorOpen(false); setInspectorStep(null); }
                       else selectStep(step.id);
                     }}>
-                      <span className="step-number">{index+1}</span><span className="step-summary-text"><strong>{step.title||"Adsız addım"}</strong><small>{lane?.name||"İcraçı seçilməyib"} <span>·</span> {kind}</small></span><ChevronDown size={15} className="step-summary-chevron"/>
+                      <span className="step-number">{index+1}</span><span className="step-summary-text"><strong>{step.title||"Adsız addım"}</strong><small>{lane?.name||(step.laneId === "" ? "Pool-dan kənar" : "İcraçı seçilməyib")} <span>·</span> {kind}</small></span><ChevronDown size={15} className="step-summary-chevron"/>
                     </button>
                     <button type="button" className="icon-button small-icon" aria-label={`${index+1}-ci addımı yuxarı keçir`} title="Yuxarı keçir" disabled={index===0} onClick={()=>changeStepOrder(step.id,"up")}><ArrowUp size={14}/></button>
                     <button type="button" className="icon-button small-icon" aria-label={`${index+1}-ci addımı aşağı keçir`} title="Aşağı keçir" disabled={index===project.steps.length-1} onClick={()=>changeStepOrder(step.id,"down")}><ArrowDown size={14}/></button>
@@ -536,7 +539,7 @@ export default function Workspace() {
                     <label className="field-label">Addımın adı<input aria-label={`${index+1}-ci addımın adı`} placeholder="Bu addımda nə baş verir?" maxLength={240} value={step.title} onChange={event=>updateStep(step.id,{title:event.target.value})}/></label>
                     <div className="field-row">
                       <label className="field-label">Element növü<select aria-label={`${index+1}-ci addımın növü`} value={step.type} onChange={event=>updateStep(step.id,{type:event.target.value as StepType,routes:event.target.value==="end"?[]:step.routes})}>{STEP_TYPES.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-                      <label className="field-label">İcraçı<select aria-label={`${index+1}-ci addımın icraçısı`} value={step.laneId} onChange={event=>updateStep(step.id,{laneId:event.target.value})}>{lanes.map(item=><option key={item.id} value={item.id}>{project.pools.length>1?`${item.poolName} / `:""}{item.name}</option>)}</select></label>
+                      <label className="field-label">İcraçı<select aria-label={`${index+1}-ci addımın icraçısı`} value={step.laneId} onChange={event=>updateStep(step.id,{laneId:event.target.value})}><option value="">Pool-dan kənar</option>{lanes.map(item=><option key={item.id} value={item.id}>{project.pools.length>1?`${item.poolName} / `:""}{item.name}</option>)}</select></label>
                     </div>
                     <label className="field-label">İşin təsviri <span className="field-hint">İstəyə bağlı</span><textarea aria-label="Addımın təsviri" rows={3} placeholder="İcraçı nə edir? Hansı qaydalar var?" maxLength={10000} value={step.description} onChange={event=>updateStep(step.id,{description:event.target.value})}/></label>
                     <StepMetadataFields key={step.id} step={step} labelPrefix={`${index+1}-ci addım`} onChange={patch=>updateStep(step.id,patch)}/>
@@ -588,7 +591,7 @@ export default function Workspace() {
 
       <ResizableSidebarSeparator width={effectiveSidebarWidth} min={280} max={sidebarMaximum} onChange={setSidebarWidth} onCommit={saveSidebarWidth}/>
       <section className={`preview-panel ${previewWidth>=720?"is-wide":"is-narrow"}`} aria-label="Canlı iş axını">
-        <Diagram project={project} selectedId={selected} selectedRoute={selectedRoute} onSelect={selectStep} onEditStep={editStep} onSelectRoute={(sourceId,index)=>selectRoute(sourceId,index,false)} onEditRoute={selectRoute} onMoveStep={moveStep} onReconnectRoute={reconnectRoute} onDuplicateStep={duplicateStep} onDeleteRoute={selection=>removeRoute(selection.sourceId,selection.routeIndex)} onResetLayout={resetLayout} onConnect={connectSteps} onDeleteStep={deleteStep} onAddShape={type=>addStep(type,true)} onInsertStep={insertStepOnRoute} onPlaceShape={placeShape} onResizeCanvas={ready?resizeCanvas:undefined} onResizePool={ready?resizePool:undefined} onResizeStep={ready?resizeStep:undefined} controlsDisabled={!ready || project.steps.length>=200} onUndo={undoEdit} canUndo={undoCount>0} onRedo={redoEdit} canRedo={redoCount>0}>
+        <Diagram project={project} selectedId={selected} selectedRoute={selectedRoute} onSelect={selectStep} onEditStep={editStep} onSelectRoute={(sourceId,index)=>selectRoute(sourceId,index,false)} onEditRoute={selectRoute} onMovePool={(id,position)=>update(current=>moveDiagramPool(current,id,position))} onMoveStep={moveStep} onReconnectRoute={reconnectRoute} onDuplicateStep={duplicateStep} onDeleteRoute={selection=>removeRoute(selection.sourceId,selection.routeIndex)} onResetLayout={resetLayout} onConnect={connectSteps} onDeleteStep={deleteStep} onAddShape={type=>addStep(type,true)} onInsertStep={insertStepOnRoute} onPlaceShape={placeShape} onResizeCanvas={ready?resizeCanvas:undefined} onResizePool={ready?resizePool:undefined} onResizeStep={ready?resizeStep:undefined} controlsDisabled={!ready || project.steps.length>=200} onUndo={undoEdit} canUndo={undoCount>0} onRedo={redoEdit} canRedo={redoCount>0}>
           {(inspectorStep || (selectedRoute && routeEditorOpen)) && <CanvasInspector project={project} stepId={inspectorStep} routeSelection={routeEditorOpen ? selectedRoute : null} onUpdate={updateStep} onReconnectRoute={reconnectRoute} onDuplicateStep={duplicateStep} onDeleteStep={deleteStep} onDeleteRoute={removeRoute} onClose={()=>{setInspectorStep(null);setRouteEditorOpen(false);}}/>}
         </Diagram>
       </section>

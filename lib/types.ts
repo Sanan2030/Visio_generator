@@ -21,7 +21,7 @@ export interface Route {
 }
 
 export interface StepPosition {
-  /** Absolute diagram x; y is the top offset within the assigned lane. */
+  /** Assigned: x relative to the default pool origin (16), y relative to the lane. Free: absolute canvas coordinates. */
   x: number;
   y: number;
 }
@@ -43,6 +43,7 @@ export const STEP_METADATA_FIELDS = [
 
 export interface Step {
   id: string;
+  /** Empty means intentionally outside every pool. */
   laneId: string;
   type: StepType;
   title: string;
@@ -64,6 +65,7 @@ export interface Pool {
   id: string;
   name: string;
   lanes: Lane[];
+  position?: StepPosition;
   size?: DiagramSize;
 }
 

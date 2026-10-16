@@ -15,10 +15,10 @@ export const MIN_NODE_Y = 16;
 export const MAX_NODE_POSITION = MAX_STEP_POSITION;
 
 /** Keep stored positions in the content area without rounding away pointer movement. */
-export function clampNodePosition(position: StepPosition): StepPosition {
+export function clampNodePosition(position: StepPosition, free = false): StepPosition {
   const clamp = (value: number, minimum: number) => Math.round(Math.min(MAX_NODE_POSITION,
     Math.max(minimum, Number.isFinite(value) ? value : minimum)) * 10) / 10;
-  return { x: clamp(position.x, MIN_NODE_X), y: clamp(position.y, MIN_NODE_Y) };
+  return { x: clamp(position.x, free ? 16 : MIN_NODE_X), y: clamp(position.y, MIN_NODE_Y) };
 }
 
 export function getStepMinimumSize(type: StepType): DiagramSize {
@@ -31,7 +31,7 @@ function dimensions(type: StepType): DiagramSize {
   if (type === "start" || type === "end" || type === "intermediate" || type === "message" || type === "timer") return { width: 48, height: 48 };
   if (type === "xor" || type === "or" || type === "and") return { width: 58, height: 58 };
   if (type === "data") return { width: 126, height: 76 };
-  if (type === "annotation") return { width: 164, height: 66 };
+  if (type === "annotation") return { width: 360, height: 140 };
   return { width: TASK_WIDTH, height: 76 };
 }
 
@@ -89,6 +89,7 @@ export function layoutProject(project: Project): ProjectLayout {
   const columnCount = Math.max(1, ...columns.values()) + (project.steps.length ? 1 : 0);
   const columnWidths = new Map<number, number>();
   for (const step of project.steps) {
+    if (step.laneId === "") continue;
     const column = columns.get(step.id) || 0;
     columnWidths.set(column, Math.max(TASK_WIDTH, columnWidths.get(column) || 0, getStepDimensions(step).width));
   }
@@ -100,22 +101,29 @@ export function layoutProject(project: Project): ProjectLayout {
   const columnRight = (column: number) => columnStart(column) + (columnWidths.get(column) || TASK_WIDTH);
   const nodeGeometry = new Map(project.steps.map(step => {
     const size = getStepDimensions(step);
-    const position = step.position && clampNodePosition(step.position);
+    const position = step.position && clampNodePosition(step.position, step.laneId === "");
     const column = columns.get(step.id) || 0;
-    const x = position?.x ?? columnStart(column) + ((columnWidths.get(column) || TASK_WIDTH) - size.width) / 2;
+    const automaticX = columnStart(column) + ((columnWidths.get(column) || TASK_WIDTH) - size.width) / 2;
+    const x = position?.x ?? (step.laneId === "" ? Math.max(16, automaticX) : automaticX);
     return [step.id, { ...size, x, relativeY: position?.y }];
   }));
+  // Free shapes extend the page bounds below; they do not resize every pool.
+  const containedSteps = project.steps.filter(step => step.laneId !== "");
+  const containedColumns = Math.max(1, ...containedSteps.map(step => columns.get(step.id) || 0)) + (containedSteps.length ? 1 : 0);
+  const containedGeometry = containedSteps.map(step => nodeGeometry.get(step.id)!);
   const contentWidth = project.size
-    ? Math.max(352, ...[...nodeGeometry.values()].map(node => node.x + node.width + 56))
-    : Math.max(960, columnRight(columnCount - 1) + 56,
-      ...[...nodeGeometry.values()].map(node => node.x + node.width + 56));
+    ? Math.max(352, ...containedGeometry.map(node => node.x + node.width + 56))
+    : Math.max(960, columnRight(containedColumns - 1) + 56,
+      ...containedGeometry.map(node => node.x + node.width + 56));
+  const poolOffsetByLane = new Map(project.pools.flatMap(pool => pool.lanes.map(lane => [lane.id, (pool.position?.x ?? 16) - 16] as const)));
   const directRoute = (source: Step, target: Step) => {
     const sourceNode = nodeGeometry.get(source.id)!;
     const targetNode = nodeGeometry.get(target.id)!;
     // Manual movement can reverse an otherwise adjacent pair. Route based on
     // the new geometry instead of treating its old automatic column as truth.
-    return targetNode.x - sourceNode.x - sourceNode.width >= 56
+    return targetNode.x + (poolOffsetByLane.get(target.laneId) ?? 0) - sourceNode.x - (poolOffsetByLane.get(source.laneId) ?? 0) - sourceNode.width >= 56
       && (source.position !== undefined || target.position !== undefined
+        || (poolOffsetByLane.get(source.laneId) ?? 0) !== 0 || (poolOffsetByLane.get(target.laneId) ?? 0) !== 0
         || columns.get(target.id) === (columns.get(source.id) ?? 0) + 1);
   };
   const laneOrder = new Map(project.pools.flatMap(pool => pool.lanes).map((lane, index) => [lane.id, index]));
@@ -134,6 +142,8 @@ export function layoutProject(project: Project): ProjectLayout {
   for (const step of project.steps) stepsByLane.set(step.laneId, [...(stepsByLane.get(step.laneId) || []), step]);
   let poolY = 16;
   for (const pool of project.pools) {
+    const poolX = pool.position?.x ?? 16;
+    const actualPoolY = pool.position?.y ?? poolY;
     const poolNodeGeometry = pool.lanes.flatMap(lane => (stepsByLane.get(lane.id) || []).map(step => nodeGeometry.get(step.id)!));
     const localContentWidth = Math.max(320, ...poolNodeGeometry.map(node => node.x + node.width + 24));
     const poolWidth = pool.size ? Math.max(pool.size.width, localContentWidth)
@@ -170,15 +180,19 @@ export function layoutProject(project: Project): ProjectLayout {
     const naturalHeight = Math.max(POOL_HEADER + 96, POOL_HEADER + laneContents.reduce((sum, lane) => sum + lane.height, 0));
     const height = Math.max(naturalHeight, pool.size?.height || 0);
     const extraPerLane = laneContents.length ? (height - naturalHeight) / laneContents.length : 0;
-    let laneY = poolY + POOL_HEADER;
+    let laneY = actualPoolY + POOL_HEADER;
     for (const content of laneContents) {
       const laneHeight = content.height + extraPerLane;
-      lanes.push({ id: content.lane.id, name: content.lane.name, poolId: pool.id, x: 16, y: laneY, width: poolWidth, height: laneHeight });
-      nodes.push(...content.nodes.map(node => ({ ...node, y: node.y + laneY })));
+      lanes.push({ id: content.lane.id, name: content.lane.name, poolId: pool.id, x: poolX, y: laneY, width: poolWidth, height: laneHeight });
+      nodes.push(...content.nodes.map(node => ({ ...node, x: node.x + poolX - 16, y: node.y + laneY })));
       laneY += laneHeight;
     }
-    pools.push({ id: pool.id, name: pool.name, x: 16, y: poolY, width: poolWidth, height });
+    pools.push({ id: pool.id, name: pool.name, x: poolX, y: actualPoolY, width: poolWidth, height });
     poolY += height + 24;
+  }
+  for (const [index, step] of project.steps.filter(step => step.laneId === "").entries()) {
+    const geometry = nodeGeometry.get(step.id)!;
+    nodes.push({ id: step.id, x: geometry.x, y: geometry.relativeY ?? poolY + 32 + index * ROW_PITCH, width: geometry.width, height: geometry.height });
   }
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const stepById = new Map(project.steps.map((step) => [step.id, step]));
@@ -192,12 +206,12 @@ export function layoutProject(project: Project): ProjectLayout {
   for (const step of project.steps) {
     const source = nodeById.get(step.id);
     const sourceLane = laneById.get(step.laneId);
-    if (!source || !sourceLane) continue;
+    if (!source) continue;
     step.routes.forEach((route, routeIndex) => {
       const target = nodeById.get(route.targetId);
       const targetStep = stepById.get(route.targetId);
       const targetLane = targetStep && laneById.get(targetStep.laneId);
-      if (!target || !targetStep || !targetLane) return;
+      if (!target || !targetStep) return;
       const sourceCount = step.routes.length;
       const targetRoutes = incoming[route.targetId] || [];
       const targetIndex = targetRoutes.indexOf(`${step.id}:${routeIndex}`);
@@ -212,18 +226,21 @@ export function layoutProject(project: Project): ProjectLayout {
       const sourceColumn = columns.get(step.id) || 0;
       const targetColumn = columns.get(route.targetId) || 0;
       let points: LayoutEdge["points"];
-      if (directRoute(step, targetStep)) {
+      const shifted = (sourceLane?.x ?? 16) !== 16 || (targetLane?.x ?? 16) !== 16;
+      if (targetX - sourceX >= 56 && (directRoute(step, targetStep) || shifted)) {
         // The column gap provides a clear vertical channel between lane rows.
-        const channelX = (step.position || targetStep.position ? sourceX : columnRight(sourceColumn))
+        const channelX = (step.position || targetStep.position || shifted || !sourceLane || !targetLane ? sourceX : columnRight(sourceColumn))
           + 28 + Math.min(routeIndex, 4) * 5;
         points = [{ x: sourceX, y: sourceY }, { x: channelX, y: sourceY }, { x: channelX, y: targetY }, { x: targetX, y: targetY }];
       } else {
         // Long and backward routes use the clear strip below the lane's nodes.
-        const corridorLane = sourceLane.y >= targetLane.y ? sourceLane : targetLane;
-        const useCount = corridorUsage.get(corridorLane.id) || 0;
-        corridorUsage.set(corridorLane.id, useCount + 1);
-        const corridorY = corridorLane.y + corridorLane.height - 16 - useCount * CORRIDOR_PITCH;
-        const manual = step.position !== undefined || targetStep.position !== undefined;
+        const corridorLane = sourceLane && targetLane ? (sourceLane.y >= targetLane.y ? sourceLane : targetLane) : undefined;
+        const corridorId = corridorLane?.id ?? "free";
+        const useCount = corridorUsage.get(corridorId) || 0;
+        corridorUsage.set(corridorId, useCount + 1);
+        const corridorY = corridorLane ? corridorLane.y + corridorLane.height - 16 - useCount * CORRIDOR_PITCH
+          : Math.max(source.y + source.height, target.y + target.height) + 32 + useCount * CORRIDOR_PITCH;
+        const manual = step.position !== undefined || targetStep.position !== undefined || shifted || !sourceLane || !targetLane;
         const exitX = (manual ? sourceX : columnRight(sourceColumn)) + 28 + (routeIndex % 4) * 4;
         const entryX = (manual ? targetX : columnStart(targetColumn)) - 18 - (targetIndex % 4) * 4;
         points = [
@@ -239,9 +256,9 @@ export function layoutProject(project: Project): ProjectLayout {
       points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
       edges.push({ sourceId: step.id, targetId: route.targetId, routeIndex,
         ...(step.routes.length > 1 ? { branchNumber: getRouteNumber(project, step.id, routeIndex) } : {}),
-        label: route.label, points, message: sourceLane.poolId !== targetLane.poolId });
+        label: route.label, points, message: sourceLane?.poolId !== targetLane?.poolId });
     });
   }
-  return { width: Math.max(contentWidth, project.size?.width || 0, ...pools.map(pool => pool.x + pool.width + 16)),
-    height: Math.max(240, poolY, project.size?.height || 0), pools, lanes, nodes, edges };
+  return { width: Math.max(contentWidth, project.size?.width || 0, ...pools.map(pool => pool.x + pool.width + 16), ...nodes.map(node => node.x + node.width + 32), ...edges.flatMap(edge => edge.points.map(point => point.x + 16))),
+    height: Math.max(240, poolY, project.size?.height || 0, ...pools.map(pool => pool.y + pool.height + 24), ...nodes.map(node => node.y + node.height + 40), ...edges.flatMap(edge => edge.points.map(point => point.y + 16))), pools, lanes, nodes, edges };
 }

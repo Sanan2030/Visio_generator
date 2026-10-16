@@ -201,6 +201,25 @@ test("VSDX exports all supported symbols as editable shapes and preserves Unicod
   }
 });
 
+test("VSDX annotations preserve blue multiline text with a transparent bracket and no step number", async () => {
+  const project = fixture();
+  const note = project.steps.find((step) => step.type === "annotation")!;
+  note.title = "• Temp_raport_no (Raportun müvəqqəti nömrəsi)";
+  note.description = "- Status (Rejected)\n• İcraçının ad, soyad, ata adı\n• İmtina qeydi";
+  const { shapes } = await getPage(await JSZip.loadAsync(await generateVsdx(project)));
+  const shape = shapes.find((candidate) => candidate["@Name"] === note.title)!;
+  assert.ok(shape);
+  assert.equal(shapeCell(shape, "FillPattern")["@V"], "0");
+  assert.equal(shapeCell(shape, "LineColor")["@V"], "#BFC3C7");
+  assert.equal(shapeCell(shape, "VerticalAlign")["@V"], "0");
+  const character = array(shape.Section).find((section) => section["@N"] === "Character")!;
+  const paragraph = array(shape.Section).find((section) => section["@N"] === "Paragraph")!;
+  assert.equal(array(array(character.Row)[0].Cell).find((value) => value["@N"] === "Color")?.["@V"], "#4472C4");
+  assert.equal(array(array(paragraph.Row)[0].Cell).find((value) => value["@N"] === "HorzAlign")?.["@V"], "0");
+  const text = typeof shape.Text === "string" ? shape.Text : shape.Text?.["#text"];
+  assert.equal(text, `${note.title}\n• Status (Rejected)\n• İcraçının ad, soyad, ata adı\n• İmtina qeydi`);
+});
+
 test("every graph edge has the correct connector type glued to its source and target shapes", async () => {
   const project = fixture();
   const layout = layoutProject(project);

@@ -10,7 +10,7 @@ export const MAX_STORED_SIZE = 2_000_000;
 export const FILE_SIZE_LABEL = formatFileSize(MAX_FILE_SIZE);
 
 export function hasProjectContent(project: Project): boolean {
-  return project.size !== undefined || project.pools.some(pool => pool.size !== undefined)
+  return project.size !== undefined || project.pools.some(pool => pool.size !== undefined || pool.position !== undefined)
     || project.steps.length > 0 || project.name !== "Yeni iş axını"
     || project.pools.length !== 1 || project.pools[0].name !== "Təşkilat"
     || project.pools[0].lanes.length !== 1 || project.pools[0].lanes[0].name !== "İştirakçı 1";

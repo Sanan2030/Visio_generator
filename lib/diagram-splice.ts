@@ -28,7 +28,7 @@ const INSERTABLE_TYPES = new Set<StepType>([
 ]);
 
 function laneExists(project: Project, laneId: string): boolean {
-  return project.pools.some(pool => pool.lanes.some(lane => lane.id === laneId));
+  return laneId === "" || project.pools.some(pool => pool.lanes.some(lane => lane.id === laneId));
 }
 
 /** A bridge can keep both facts when their fields do not disagree. */
@@ -119,12 +119,12 @@ function applyInsertion(
 ): DiagramInsertionResult {
   if (placement && !laneExists(project, placement.laneId)) return { project, error: "Addım üçün mövcud iştirakçı seçin." };
   const prepared = typeof candidate !== "string" && placement
-    ? { ...candidate, laneId: placement.laneId, position: clampNodePosition(placement.position) } : candidate;
+    ? { ...candidate, laneId: placement.laneId, position: clampNodePosition(placement.position, placement.laneId === "") } : candidate;
   const plan = insertionPlan(project, selection, prepared);
   if (typeof plan === "string") return { project, error: plan };
   const moved: Step = {
     ...plan.inserted,
-    ...(placement ? { laneId: placement.laneId, position: clampNodePosition(placement.position) } : {}),
+    ...(placement ? { laneId: placement.laneId, position: clampNodePosition(placement.position, placement.laneId === "") } : {}),
     routes: [{ targetId: plan.target.id, label: "" }],
   };
   const steps = project.steps.filter(step => step.id !== moved.id).map(step => {
@@ -148,18 +148,19 @@ function avoidInsertionOverlap(project: Project, stepId: string): Project | null
   const layout = layoutProject(project);
   const node = layout.nodes.find(candidate => candidate.id === stepId);
   const lane = layout.lanes.find(candidate => candidate.id === step.laneId);
-  if (!node || !lane) return null;
+  if (!node) return null;
+  const laneY = lane?.y ?? 0;
   const ids = new Set(project.steps.filter(candidate => candidate.id !== stepId && candidate.laneId === step.laneId).map(candidate => candidate.id));
   const others = layout.nodes.filter(candidate => ids.has(candidate.id)
     && node.x < candidate.x + candidate.width + 12 && node.x + node.width + 12 > candidate.x);
-  const startingY = node.y - lane.y;
+  const startingY = node.y - laneY;
   const freeY = (start: number): number | null => {
     let y = start;
     for (let attempt = 0; attempt <= others.length && y <= MAX_NODE_POSITION; attempt++) {
-      const collisions = others.filter(candidate => y < candidate.y - lane.y + candidate.height + 12
-        && y + node.height + 12 > candidate.y - lane.y);
+      const collisions = others.filter(candidate => y < candidate.y - laneY + candidate.height + 12
+        && y + node.height + 12 > candidate.y - laneY);
       if (!collisions.length) return y;
-      const bottom = Math.max(...collisions.map(candidate => candidate.y - lane.y + candidate.height + 12));
+      const bottom = Math.max(...collisions.map(candidate => candidate.y - laneY + candidate.height + 12));
       // Resized shapes may cover several rows, so skip those rows in one jump.
       y += Math.max(1, Math.ceil((bottom - y) / 118)) * 118;
     }
@@ -169,7 +170,7 @@ function avoidInsertionOverlap(project: Project, stepId: string): Project | null
   if (y === null) return null;
   if (y === startingY) return project;
   return { ...project, steps: project.steps.map(candidate => candidate.id === stepId
-    ? { ...candidate, position: clampNodePosition({ x: node.x, y }) } : candidate) };
+    ? { ...candidate, position: clampNodePosition({ x: node.x - (lane?.x ?? 16) + 16, y }, step.laneId === "") } : candidate) };
 }
 
 /** A → B becomes A → N → B; the original condition belongs to A → N. */

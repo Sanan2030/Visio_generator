@@ -84,6 +84,14 @@ Unit testlər proses qaydalarını, dövrlərin yerləşməsini, saxlanmış lay
 
 Word sənədi ayrıca Office Open XML paketidir; həqiqi cədvəl, təkrarlanan başlıq və Azərbaycan hərfləri saxlanılır. Əlavə paket tələb olunmur. Word/VSDX struktur testlərindən başqa sürüklənən mövqelərin bərpası, native Visio koordinatları, bağlı oxlar və qol nömrələri də yoxlanılır.
 
+## Sərbəst diaqram redaktəsi
+
+Pool-un başlığını sürükləyəndə onun zolaqları və fiqurları birlikdə hərəkət edir; oxların ucları bağlı qalır. Yerləşmə avtomatik saxlanılır, yenidən açılışda bərpa olunur və Word/Visio/SVG/PNG ixracı ilə uyğun qalır. Geri al və yenidən tətbiq əməliyyatları pool hərəkətini də dəstəkləyir.
+
+Palitradan fiquru pool-lar arasındakı boş sahəyə buraxmaq və ya mövcud fiquru ora sürükləmək olar. Belə fiqur **Pool-dan kənar** olur; icraçı seçicisindən bunu əl ilə seçmək və sonradan istənilən zolağa bağlamaq mümkündür. Sərbəst fiquru oxa buraxmaq həmin keçidin arasına addım əlavə edir və əvvəlki şərt/izahı qoruyur. Redaktə panelində **Fiqurun mövqeyi → X/Y** sahələri dəqiq yerləşdirmə üçündür; Enter və ya sahədən çıxış dəyişikliyi saxlayır.
+
+**Qeyd** fonu olmayan nazik sol mötərizə və mavi mətnlə göstərilir. Qeydin mətnində hər məlumatı yeni sətirdə yazmaq, `•`, `-` və ya `*` ilə siyahı yaratmaq olar. Uzun sətirlər bükülür, siyahı girintisi qorunur; qeyd tapşırıq kartı kimi nömrələnmir. Ölçü tutacağından qeydi böyütmək mümkündür. Visio ixracında mətn və mötərizə redaktə oluna bilir.
+
 ## İnterfeys nümunələri
 
 Ana səhifədə D iş masası yerləşməsi işləyir: başlıq, sol forma və sağdakı diaqram qaranlıqdır. Sahələr, fokus, seçim, xəta və uğur rəngləri hər fon üçün ayrıca seçilib. [Əvvəlki rəng variantının görünüşü](public/design-previews/design-d.png).
@@ -126,4 +134,4 @@ VSDX native fiqurlar, Unicode mətn və əlaqəli birləşdiricilərdən ibarət
 
 **Sloth AI hazırda qoşulmayıb.** İstifadə yeri və API müqaviləsi dəqiqləşəndən sonra inteqrasiya ayrıca əlavə edilə bilər. Hazırkı izah xarici AI çağırışı etmədən, formaya daxil edilən məlumatlardan qaydalar əsasında hazırlanır.
 
-Bir layihədə maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element mümkündür. Natamam addımlar da avtomatik saxlanılır; Visio faylını yükləmək üçün struktur xətaları düzəldilməlidir. Yeni yazmalar üçün layihə həddi 2 MB UTF-8-dir; bu, adətən 5 MiB olan localStorage tutumu üçün ehtiyatlı həddir. Saytda qalan ümumi yer ayrıca yoxlanılır və yaddaş dolarsa aydın bildiriş göstərilir. Əvvəlki böyük layihələr açılır, amma həddi aşan yeni yazma mövcud saxlanmış nüsxəni əvəz etmir. Fiquru lane-lər və pool-lar arasında sürükləmək, həmçinin redaktə panelində icraçısını seçmək mümkündür. Pool-lar arasında keçid yaradıldıqda mesaj axını avtomatik göstərilir. Pool və diaqram ölçüləri məzmuna görə avtomatik hesablanır və əl ilə dəyişdirilə bilər. Pool-ların sərbəst yerini dəyişmək bu versiyaya daxil deyil. Fiqurların ölçüsü də dəyişdirilir; hadisə və gateway formaları kvadrat nisbəti qoruyur.
+Bir layihədə maksimum 8 pool, hər pool üçün 20 lane və ümumi 200 element mümkündür. Natamam addımlar da avtomatik saxlanılır; Visio faylını yükləmək üçün struktur xətaları düzəldilməlidir. Yeni yazmalar üçün layihə həddi 2 MB UTF-8-dir; bu, adətən 5 MiB olan localStorage tutumu üçün ehtiyatlı həddir. Saytda qalan ümumi yer ayrıca yoxlanılır və yaddaş dolarsa aydın bildiriş göstərilir. Əvvəlki böyük layihələr açılır, amma həddi aşan yeni yazma mövcud saxlanmış nüsxəni əvəz etmir. Fiquru lane-lər və pool-lar arasında sürükləmək, həmçinin redaktə panelində icraçısını seçmək mümkündür. Pool-lar arasında keçid yaradıldıqda mesaj axını avtomatik göstərilir. Pool və diaqram ölçüləri məzmuna görə avtomatik hesablanır və əl ilə dəyişdirilə bilər. Pool-ları başlığından sürükləyərək daxilindəki fiqurlarla birlikdə hərəkət etdirmək olar. Başlıq fokusda olduqda ox düymələri 10, Shift + ox isə 50 piksel dəyişir; Escape sürükləməni ləğv edir. Fiqurların ölçüsü də dəyişdirilir; hadisə və gateway formaları kvadrat nisbəti qoruyur.

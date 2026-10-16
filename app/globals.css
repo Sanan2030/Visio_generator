@@ -424,6 +424,7 @@ h1, h2, h3, p { margin: 0; }
   --diagram-start: #8dd5b0;
   --diagram-end: #f4a4a4;
   --diagram-annotation: #98a8bc;
+  --diagram-annotation-ink: #98baff;
   --diagram-accent: #98b3ff;
   --diagram-accent-soft: #243858;
   --diagram-on-accent: #141a22;
@@ -698,3 +699,8 @@ h1, h2, h3, p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition: none !important; }
 }
+
+.inspector-position { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.inspector-position legend { padding: 0 5px; color: var(--muted); font-size: 12px; }
+[data-pool-handle]:focus-visible { outline: none; }
+[data-pool-handle]:focus-visible > path { stroke: var(--accent); stroke-width: 2px; }

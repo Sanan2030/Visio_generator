@@ -57,7 +57,7 @@ export function resizeDiagramStep(project: Project, stepId: string, size: Diagra
   const lane = layout?.lanes.find(item => item.id === step.laneId);
   // Bottom-right resizing keeps the opposite corner fixed, including shapes
   // that previously used automatic placement; this is one undoable mutation.
-  const position = step.position ?? (node && lane ? { x: node.x, y: node.y - lane.y } : undefined);
+  const position = step.position ?? (node ? { x: node.x - (lane?.x ?? 16) + 16, y: node.y - (lane?.y ?? 0) } : undefined);
   return { ...project, steps: project.steps.map(item => item.id === stepId ? { ...item, size: nextSize,
     ...(position ? { position } : {}) } : item) };
 }

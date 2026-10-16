@@ -17,8 +17,8 @@ export function moveDiagramStep(project: Project, id: string, position: StepPosi
   const step = project.steps.find((candidate) => candidate.id === id);
   if (!step) return project;
   const destination = laneId ?? step.laneId;
-  if (!project.pools.some((pool) => pool.lanes.some((lane) => lane.id === destination))) return project;
-  const bounded = clampNodePosition(position);
+  if (destination !== "" && !project.pools.some((pool) => pool.lanes.some((lane) => lane.id === destination))) return project;
+  const bounded = clampNodePosition(position, destination === "");
   if (step.laneId === destination && step.position?.x === bounded.x && step.position?.y === bounded.y) return project;
   return { ...project, steps: project.steps.map((candidate) => candidate.id === id
     ? { ...candidate, laneId: destination, position: bounded } : candidate) };
@@ -82,11 +82,29 @@ export function duplicateDiagramStep(project: Project, id: string, newId: string
   const layout = layoutProject(project);
   const node = layout.nodes.find((candidate) => candidate.id === id);
   const lane = layout.lanes.find((candidate) => candidate.id === original.laneId);
-  if (!lane || !node) return { project, error: "Addımın iştirakçısını seçdikdən sonra kopyalayın." };
-  const position = original.position ?? { x: node.x, y: node.y - lane.y };
-  const copy = { ...original, id: newId, routes: [], position: clampNodePosition({ x: position.x + 24, y: position.y + 24 }) };
+  if (!node || (!lane && original.laneId !== "")) return { project, error: "Addımın iştirakçısını seçdikdən sonra kopyalayın." };
+  const position = original.position ?? { x: node.x - (lane?.x ?? 16) + 16, y: node.y - (lane?.y ?? 0) };
+  const copy = { ...original, id: newId, routes: [], position: clampNodePosition({ x: position.x + 24, y: position.y + 24 }, original.laneId === "") };
   return {
     project: { ...project, steps: [...project.steps.slice(0, index + 1), copy, ...project.steps.slice(index + 1)] },
     stepId: newId,
   };
+}
+
+/** Move the pool as a container; child offsets and unrelated pools stay fixed. */
+export function moveDiagramPool(project: Project, id: string, position: StepPosition): Project {
+  const pool = project.pools.find(item => item.id === id);
+  if (!pool) return project;
+  const bounded = clampNodePosition(position, true);
+  if (pool.position?.x === bounded.x && pool.position?.y === bounded.y) return project;
+  return { ...project, pools: project.pools.map(item => item.id === id ? { ...item, position: bounded } : item) };
+}
+
+/** Preserve the visible location when changing an actor from the form or inspector. */
+export function assignDiagramStep(project: Project, id: string, laneId: string): Project {
+  const layout = layoutProject(project);
+  const node = layout.nodes.find(item => item.id === id);
+  const lane = layout.lanes.find(item => item.id === laneId);
+  if (!node || (laneId !== "" && !lane)) return project;
+  return moveDiagramStep(project, id, { x: node.x - (lane?.x ?? 16) + 16, y: node.y - (lane?.y ?? 0) }, laneId);
 }

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Circle, Copy, Diamond, Expand, Minus, MousePointer2, Move, Pencil, Plus, Redo2, RotateCcw, Scan, Shrink, Square, StickyNote, Trash2, Undo2, Waypoints } from "lucide-react";
-import { clampNodePosition, layoutProject } from "@/lib/layout";
+import { clampNodePosition, getStepDimensions, layoutProject } from "@/lib/layout";
+import { moveDiagramPool } from "@/lib/diagram-edit";
 import { resizeDiagramPool, resizeDiagramStep, resizeProjectCanvas } from "@/lib/diagram-size";
 import { canInsertStepTypeOnRoute, findInsertionRoute } from "@/lib/diagram-splice";
 import { diagramColor } from "@/lib/diagram-palette";
+import { annotationText, wrapAnnotationText } from "@/lib/annotation-text";
 import { displayRouteLabel, getStepNumber } from "@/lib/step-numbering";
 import type { LayoutLane, LayoutPoint, Project, StepType } from "@/lib/types";
 
@@ -16,6 +18,7 @@ type DiagramProps = {
   selectedId?: string | null;
   onSelect: (id: string) => void;
   selectedRoute?: DiagramRouteSelection | null;
+  onMovePool?: (id: string, position: LayoutPoint) => void;
   onMoveStep?: (id: string, position: LayoutPoint, laneId?: string, insertionRoute?: DiagramRouteSelection) => void;
   onInsertStep?: (selection: DiagramRouteSelection, type: StepType, position?: LayoutPoint, laneId?: string) => boolean;
   onPlaceShape?: (type: StepType, position: LayoutPoint, laneId: string) => boolean;
@@ -40,11 +43,15 @@ type DiagramProps = {
   children?: ReactNode;
 };
 
+type PoolGesture = {
+  kind: "pool"; id: string; pointerId: number; start: LayoutPoint; origin: LayoutPoint; position: LayoutPoint;
+  clientX: number; clientY: number; moved: boolean; inverseMatrix: DOMMatrix;
+};
 type DragGesture = {
   kind: "node"; id: string; pointerId: number; start: LayoutPoint; origin: LayoutPoint;
   clientX: number; clientY: number; position: LayoutPoint; moved: boolean;
   originalLaneId: string; laneId: string | null; lanes: LayoutLane[]; width: number; height: number;
-  originalY: number;
+  originalY: number; originalX: number;
   insertionRoute: DiagramRouteSelection | null;
 };
 type PaletteGesture = {
@@ -104,6 +111,15 @@ function TextLines({ text, x, y, width = 140, maxLines = 4, size = 12, color = d
   </text>;
 }
 
+function AnnotationText({ text, x, y, width, height }: { text: string; x: number; y: number; width: number; height: number }) {
+  const size = 13;
+  const lineHeight = 18;
+  const lines = wrapAnnotationText(text, (width - 28) / (size * 0.54), (height - 12) / lineHeight);
+  return <text className="diagram-annotation-text" x={x + 14} y={y + size + 6} textAnchor="start" fill={diagramColor("annotation-ink")} fontSize={size} fontWeight="400">
+    {lines.map((line, index) => <tspan x={x + 14 + (line.continuation ? 14 : 0)} dy={index ? lineHeight : 0} key={index}>{line.text || "\u00a0"}</tspan>)}
+  </text>;
+}
+
 function routeLabelPosition(points: { x: number; y: number }[], branch = false) {
   if (branch && points.length <= 4) {
     const a = points[points.length - 2], b = points[points.length - 1];
@@ -120,7 +136,7 @@ function routeLabelPosition(points: { x: number; y: number }[], branch = false) 
   return result;
 }
 
-export default function Diagram({ project, selectedId, selectedRoute, onSelect, onMoveStep, onInsertStep, onPlaceShape, onResizeCanvas, onResizePool, onResizeStep, onEditStep, onSelectRoute, onEditRoute, onConnect, onResetLayout, onDeleteStep, onReconnectRoute, onDuplicateStep, onDeleteRoute, onAddShape, controlsDisabled = false, onUndo, canUndo = false, onRedo, canRedo = false, children }: DiagramProps) {
+export default function Diagram({ project, selectedId, selectedRoute, onSelect, onMovePool, onMoveStep, onInsertStep, onPlaceShape, onResizeCanvas, onResizePool, onResizeStep, onEditStep, onSelectRoute, onEditRoute, onConnect, onResetLayout, onDeleteStep, onReconnectRoute, onDuplicateStep, onDeleteRoute, onAddShape, controlsDisabled = false, onUndo, canUndo = false, onRedo, canRedo = false, children }: DiagramProps) {
   const [draftPosition, setDraftPosition] = useState<{ id: string; point: LayoutPoint; laneId: string | null } | null>(null);
   const [resizeDraft, setResizeDraft] = useState<Project | null>(null);
   const [paletteDraft, setPaletteDraft] = useState<{ type: StepType; point: LayoutPoint; laneId: string | null } | null>(null);
@@ -153,7 +169,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
   const viewport = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const captureElement = useRef<SVGElement | HTMLElement | null>(null);
-  const gesture = useRef<DragGesture | ConnectGesture | ReconnectGesture | PaletteGesture | ResizeGesture | null>(null);
+  const gesture = useRef<PoolGesture | DragGesture | ConnectGesture | ReconnectGesture | PaletteGesture | ResizeGesture | null>(null);
   const suppressClick = useRef(false);
   const cancelledPalettePointer = useRef<number | null>(null);
   const pan = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
@@ -343,19 +359,37 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     const node = layout.nodes.find((item) => item.id === id);
     const lane = layout.lanes.find((item) => item.id === step?.laneId);
     const point = diagramPoint(event.clientX, event.clientY);
-    if (!node || !lane || !point) return;
+    if (!node || !step || !point) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.focus({ preventScroll: true });
-    const origin = { x: node.x, y: node.y - lane.y };
+    const origin = { x: node.x - (lane?.x ?? 16) + 16, y: node.y - (lane?.y ?? 0) };
     gesture.current = {
       kind: "node", id, pointerId: event.pointerId, start: point, origin,
       clientX: event.clientX, clientY: event.clientY, position: origin, moved: false,
-      originalLaneId: lane.id, laneId: lane.id, lanes: baseLayout.lanes,
-      width: node.width, height: node.height, originalY: node.y,
+      originalLaneId: step.laneId, laneId: step.laneId, lanes: baseLayout.lanes,
+      width: node.width, height: node.height, originalY: node.y, originalX: node.x,
       insertionRoute: null,
     };
     capturePointer(event.pointerId, event.currentTarget);
+  }
+
+  function beginPoolDrag(event: ReactPointerEvent<SVGGElement>, id: string) {
+    if (!event.isPrimary || event.button !== 0 || !onMovePool || activeTool !== "select") return;
+    const pool = baseLayout.pools.find(item => item.id === id);
+    const point = diagramPoint(event.clientX, event.clientY);
+    const matrix = svg.current?.getScreenCTM();
+    if (!pool || !point || !matrix) return;
+    event.preventDefault(); event.stopPropagation();
+    event.currentTarget.focus({ preventScroll: true });
+    cancelGesture();
+    gesture.current = { kind: "pool", id, pointerId: event.pointerId, start: point, origin: { x: pool.x, y: pool.y }, position: { x: pool.x, y: pool.y }, clientX: event.clientX, clientY: event.clientY, moved: false, inverseMatrix: matrix.inverse() };
+    capturePointer(event.pointerId, event.currentTarget);
+  }
+
+  function isFreePlacement(point: LayoutPoint) {
+    return point.x >= 16 && point.y >= 16 && point.x <= diagramWidth && point.y <= diagramHeight
+      && !baseLayout.pools.some(pool => point.x >= pool.x && point.x <= pool.x + pool.width && point.y >= pool.y && point.y <= pool.y + pool.height);
   }
 
   function beginPaletteDrag(event: ReactPointerEvent<HTMLButtonElement>, type: StepType) {
@@ -447,7 +481,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     if (!current || current.pointerId !== event.pointerId) return false;
     // Growing a centered SVG changes its screen origin. Use the starting frame
     // for the whole resize so repeated pointer events do not amplify its delta.
-    const point = current.kind === "resize"
+    const point = (current.kind === "resize" || current.kind === "pool")
       ? new DOMPoint(event.clientX, event.clientY).matrixTransform(current.inverseMatrix)
       : diagramPoint(event.clientX, event.clientY);
     if (!point) return true;
@@ -457,27 +491,30 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     }
     if (current.kind === "node") {
       if (!current.moved) return true;
-      const absolute = { x: current.origin.x + point.x - current.start.x, y: current.originalY + point.y - current.start.y };
+      const absolute = { x: current.originalX + point.x - current.start.x, y: current.originalY + point.y - current.start.y };
       const center = { x: absolute.x + current.width / 2, y: absolute.y + current.height / 2 };
       const lane = current.lanes.find((item) => center.x >= item.x + 136 && center.x <= item.x + item.width && center.y >= item.y && center.y <= item.y + item.height);
-      current.laneId = lane?.id ?? null;
-      current.position = clampNodePosition({ x: absolute.x, y: lane ? Math.min(lane.height - current.height - 16, absolute.y - lane.y) : current.origin.y });
-      current.insertionRoute = lane ? findInsertionRoute(project, baseLayout, center, current.id, 14 / zoom) : null;
+      current.laneId = lane?.id ?? (isFreePlacement(center) ? "" : null);
+      current.position = clampNodePosition({ x: absolute.x - (lane?.x ?? 16) + 16, y: lane ? Math.min(lane.height - current.height - 16, absolute.y - lane.y) : absolute.y }, !lane);
+      current.insertionRoute = current.laneId !== null ? findInsertionRoute(project, baseLayout, center, current.id, 14 / zoom) : null;
       setInsertionTarget(current.insertionRoute);
       setDraggingId(current.id);
-      setDraftPosition({ id: current.id, point: { x: current.position.x, y: lane ? lane.y + current.position.y : absolute.y }, laneId: current.laneId });
+      setDraftPosition({ id: current.id, point: { x: current.position.x + (lane?.x ?? 16) - 16, y: (lane?.y ?? 0) + current.position.y }, laneId: current.laneId });
     } else if (current.kind === "palette") {
       if (!current.moved) return true;
       current.point = point;
       const lane = baseLayout.lanes.find((item) => point.x >= item.x + 136 && point.x <= item.x + item.width && point.y >= item.y && point.y <= item.y + item.height);
-      current.laneId = lane?.id ?? null;
-      const width = current.type === "start" ? 48 : current.type === "xor" ? 58 : 164;
-      const height = current.type === "start" ? 48 : current.type === "xor" ? 58 : current.type === "annotation" ? 66 : 76;
-      current.position = clampNodePosition({ x: point.x - width / 2, y: lane ? Math.min(lane.height - height - 16, point.y - lane.y - height / 2) : 16 });
-      const candidate = lane ? findInsertionRoute(project, baseLayout, point, undefined, 14 / zoom) : null;
+      current.laneId = lane?.id ?? (isFreePlacement(point) ? "" : null);
+      const { width, height } = getStepDimensions({ type: current.type });
+      current.position = clampNodePosition({ x: point.x - width / 2 - (lane?.x ?? 16) + 16, y: lane ? Math.min(lane.height - height - 16, point.y - lane.y - height / 2) : point.y - height / 2 }, !lane);
+      const candidate = current.laneId !== null ? findInsertionRoute(project, baseLayout, point, undefined, 14 / zoom) : null;
       current.insertionRoute = candidate && onInsertStep && canInsertStepTypeOnRoute(project, candidate, current.type) ? candidate : null;
       setInsertionTarget(current.insertionRoute);
-      setPaletteDraft({ type: current.type, point: { x: current.position.x, y: lane ? lane.y + current.position.y : point.y - height / 2 }, laneId: current.laneId });
+      setPaletteDraft({ type: current.type, point: { x: current.position.x + (lane?.x ?? 16) - 16, y: (lane?.y ?? 0) + current.position.y }, laneId: current.laneId });
+    } else if (current.kind === "pool") {
+      if (!current.moved) return true;
+      current.position = clampNodePosition({ x: current.origin.x + point.x - current.start.x, y: current.origin.y + point.y - current.start.y }, true);
+      setResizeDraft(moveDiagramPool(project, current.id, current.position));
     } else if (current.kind === "resize") {
       if (!current.moved) return true;
       current.size = { width: current.origin.width + point.x - current.start.x, height: current.origin.height + point.y - current.start.y };
@@ -502,21 +539,23 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     // A pointer release also dispatches click; consume it without hiding the next deliberate click.
     window.setTimeout(() => { suppressClick.current = false; }, 0);
     if (current.kind === "node") {
-      if (current.moved && current.laneId && (current.laneId !== current.originalLaneId || current.position.x !== current.origin.x || current.position.y !== current.origin.y)) {
+      if (current.moved && current.laneId !== null && (current.laneId !== current.originalLaneId || current.position.x !== current.origin.x || current.position.y !== current.origin.y)) {
         onMoveStep?.(current.id, current.position, current.laneId, current.insertionRoute ?? undefined);
-        setEditNotice(current.insertionRoute ? "Addım keçidin arasına birləşdirildi. İzah yeniləndi." : current.laneId !== current.originalLaneId ? "Addım digər iştirakçıya keçirildi. İzahda icraçı yeniləndi." : "Addımın yeri saxlanıldı.");
-      } else if (current.moved && !current.laneId) {
-        setEditNotice("Addımı iştirakçı sahəsinə burax. Dəyişiklik ləğv edildi.");
+        setEditNotice(current.insertionRoute ? "Addım keçidin arasına birləşdirildi. İzah yeniləndi." : current.laneId === "" && current.originalLaneId !== "" ? "Addım pool-dan kənara keçirildi." : current.laneId !== current.originalLaneId ? "Addım digər iştirakçıya keçirildi. İzahda icraçı yeniləndi." : "Addımın yeri saxlanıldı.");
+      } else if (current.moved && current.laneId === null) {
+        setEditNotice("Addımı diaqramın boş sahəsinə və ya iştirakçı zolağına burax. Dəyişiklik ləğv edildi.");
       }
       onSelect(current.id);
     } else if (current.kind === "palette") {
       if (!current.moved) onAddShape?.(current.type);
-      else if (current.laneId) {
+      else if (current.laneId !== null) {
         const accepted = current.insertionRoute
           ? onInsertStep?.(current.insertionRoute, current.type, current.position, current.laneId)
           : onPlaceShape?.(current.type, current.position, current.laneId);
         setEditNotice(accepted ? current.insertionRoute ? "Yeni addım keçidin arasına birləşdirildi." : "Yeni fiqur əlavə edildi." : "Fiqur əlavə edilmədi.");
-      } else setEditNotice("Fiquru iştirakçı sahəsinə burax. Dəyişiklik ləğv edildi.");
+      } else setEditNotice("Fiquru diaqramın boş sahəsinə və ya iştirakçı zolağına burax. Dəyişiklik ləğv edildi.");
+    } else if (current.kind === "pool") {
+      if (current.moved) { onMovePool?.(current.id, current.position); setEditNotice("Pool və daxilindəki fiqurların yeri saxlanıldı."); }
     } else if (current.kind === "resize") {
       if (current.moved) { commitResize(current.target, current.id, current.size); setEditNotice("Ölçü saxlanıldı."); }
     } else if (current.kind === "reconnect") {
@@ -576,15 +615,15 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     const step = stepById.get(id);
     const node = layout.nodes.find((item) => item.id === id);
     const lane = layout.lanes.find((item) => item.id === step?.laneId);
-    if (!node || !lane) return false;
+    if (!node || !step) return false;
     event.preventDefault();
     event.stopPropagation();
     stopAutomaticFit();
     const distance = event.shiftKey ? 10 : 1;
     const position = clampNodePosition({
-      x: node.x + (event.key === "ArrowLeft" ? -distance : event.key === "ArrowRight" ? distance : 0),
-      y: Math.min(lane.height - node.height - 16, node.y - lane.y + (event.key === "ArrowUp" ? -distance : event.key === "ArrowDown" ? distance : 0)),
-    });
+      x: node.x - (lane?.x ?? 16) + 16 + (event.key === "ArrowLeft" ? -distance : event.key === "ArrowRight" ? distance : 0),
+      y: Math.min(lane ? lane.height - node.height - 16 : Infinity, node.y - (lane?.y ?? 0) + (event.key === "ArrowUp" ? -distance : event.key === "ArrowDown" ? distance : 0)),
+    }, step.laneId === "");
     onMoveStep(id, position);
     return true;
   }
@@ -676,7 +715,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
       <div className="diagram-controls">
         {onUndo && <button type="button" className="diagram-control" aria-label="Son dəyişikliyi geri al" title="Geri al" onClick={onUndo} disabled={!canUndo}><Undo2 size={17} /></button>}
         {onRedo && <button type="button" className="diagram-control" aria-label="Geri alınmış dəyişikliyi yenidən tətbiq et" title="Yenidən tətbiq et" onClick={onRedo} disabled={!canRedo}><Redo2 size={17} /></button>}
-        {onResetLayout && <button type="button" className="diagram-control" aria-label="Diaqramı avtomatik düz" title="Avtomatik düz" onClick={onResetLayout} disabled={!project.steps.some((step) => step.position)}><RotateCcw size={15} /></button>}
+        {onResetLayout && <button type="button" className="diagram-control" aria-label="Diaqramı avtomatik düz" title="Avtomatik düz" onClick={onResetLayout} disabled={!project.steps.some((step) => step.position) && !project.pools.some(pool => pool.position)}><RotateCcw size={15} /></button>}
         <button type="button" className="diagram-control" aria-label="Diaqramı kiçilt" title="Kiçilt" onClick={() => changeZoom(zoom - 0.1)} disabled={zoom <= MIN_MANUAL_ZOOM}><Minus size={15} /></button>
         <span className="diagram-zoom" aria-live="polite">{zoom < 0.1 ? Math.round(zoom * 1000) / 10 : Math.round(zoom * 100)}%</span>
         <button type="button" className="diagram-control" aria-label="Diaqramı böyüt" title="Böyüt" onClick={() => changeZoom(zoom + 0.1)} disabled={zoom >= MAX_ZOOM}><Plus size={15} /></button>
@@ -693,7 +732,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
     {fullscreenNotice && <div className="diagram-notice" role="status">{fullscreenNotice}</div>}
     {insertionTarget && <div className="diagram-operation-hint" role="status">Burax: addım bu keçidə birləşəcək</div>}
     <span className="sr-only" role="status">{editNotice}</span>
-    <div ref={viewport} className={`diagram-viewport${panning ? " is-panning" : ""}${activeTool === "pan" ? " is-pan-tool" : ""}${draggingId ? " is-dragging-node" : ""}${connection || connectionSource || reconnectChoice || reconnectPreview ? " is-connecting" : ""}`} tabIndex={0} role="region" aria-label="Diaqram sahəsi. Fiqurları iştirakçılar arasında sürüşdürün. Keçidin ucunu başqa fiqura birləşdirin. Seçilmiş fiquru ox düymələri ilə hərəkət etdirin."
+    <div ref={viewport} className={`diagram-viewport${panning ? " is-panning" : ""}${activeTool === "pan" ? " is-pan-tool" : ""}${draggingId ? " is-dragging-node" : ""}${connection || connectionSource || reconnectChoice || reconnectPreview ? " is-connecting" : ""}`} tabIndex={0} role="region" aria-label="Diaqram sahəsi. Pool-ları başlığından, fiqurları iştirakçılar arasında və ya boş sahəyə sürüşdürün. Keçidin ucunu başqa fiqura birləşdirin. Seçilmiş fiquru ox düymələri ilə hərəkət etdirin."
       onWheel={() => {
         const view = viewport.current;
         if (view && (view.scrollWidth > view.clientWidth + 1 || view.scrollHeight > view.clientHeight + 1)) stopAutomaticFit();
@@ -740,8 +779,17 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
           </text>
           {layout.pools.map((pool) => <g key={pool.id}>
             <rect x={pool.x} y={pool.y} width={pool.width} height={pool.height} rx="8" fill={diagramColor("surface")} stroke={diagramColor("border")} strokeWidth="1.3" />
+            <g data-pool-handle={pool.id} role="button" tabIndex={0} aria-label={`Poolu hərəkət etdir: ${pool.name || "Adsız pool"}`} style={{ touchAction: "none", cursor: activeTool === "pan" ? "grab" : "move" }} onPointerDown={event => beginPoolDrag(event, pool.id)}
+              onKeyDown={event => {
+                if (!onMovePool || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
+                event.preventDefault(); event.stopPropagation(); stopAutomaticFit();
+                const distance = event.shiftKey ? 50 : 10;
+                onMovePool(pool.id, { x: pool.x + (event.key === "ArrowLeft" ? -distance : event.key === "ArrowRight" ? distance : 0), y: pool.y + (event.key === "ArrowUp" ? -distance : event.key === "ArrowDown" ? distance : 0) });
+              }}>
+            <title>Poolu daxilindəki fiqurlarla birlikdə sürüşdür. Ox düymələri: 10 px; Shift: 50 px.</title>
             <path d={`M ${pool.x + 8} ${pool.y} H ${pool.x + pool.width - 8} Q ${pool.x + pool.width} ${pool.y} ${pool.x + pool.width} ${pool.y + 8} V ${pool.y + 36} H ${pool.x} V ${pool.y + 8} Q ${pool.x} ${pool.y} ${pool.x + 8} ${pool.y} Z`} fill={diagramColor("header")} />
             <text x={pool.x + 16} y={pool.y + 23} fill={diagramColor("ink")} fontSize="12" fontWeight="600"><title>{pool.name || "Adsız pool"}</title>{wrapText(pool.name || "Adsız pool", Math.max(8, Math.floor((pool.width - 124) / 6.5)), 1)[0]}</text>
+            </g>
           </g>)}
           {layout.lanes.map((lane) => <g key={lane.id}>
             <title>{lane.name || "Adsız iştirakçı"}</title>
@@ -828,7 +876,7 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
                 else if (event.key === "F2") { event.preventDefault(); event.stopPropagation(); onEditStep?.(node.id); }
                 else if (event.key === "Delete" || event.key === "Backspace") { if (onDeleteStep) { event.preventDefault(); event.stopPropagation(); onDeleteStep(node.id); } }
               }}>
-              <title>{`${stepNumber}. ${typeLabels[step.type]}: ${step.title || "Adsız addım"}${step.description ? `\n${step.description}` : ""}\nSürüşdür və ya iki dəfə kliklə redaktə et.`}</title>
+              <title>{`${step.type === "annotation" ? "" : `${stepNumber}. `}${typeLabels[step.type]}: ${step.title || "Adsız addım"}${step.description ? `\n${step.description}` : ""}\nSürüşdür və ya iki dəfə kliklə redaktə et.`}</title>
               {selected && <rect data-editor-only="selection" x={x - 4} y={y - 4} width={width + 8} height={height + 8} rx={event ? r + 4 : 12} fill="none" stroke={diagramColor("accent")} strokeOpacity="0.14" strokeWidth="6" />}
               {isTarget && <rect data-editor-only="connection-target" x={x - 9} y={y - 9} width={width + 18} height={height + 18} rx="13" fill="none" stroke={diagramColor("accent")} strokeWidth="2.5" strokeDasharray="4 3" />}
               {gateway ? <>
@@ -845,9 +893,9 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
                 <path d={`M ${x} ${y} H ${x + width - 17} L ${x + width} ${y + 17} V ${y + height} H ${x} Z M ${x + width - 17} ${y} V ${y + 17} H ${x + width}`} fill={diagramColor("node")} stroke={diagramColor("shape-border")} strokeWidth="1.7" />
                 <TextLines text={step.title} x={cx} y={cy + 4} width={width - 24} maxLines={4} />
               </> : step.type === "annotation" ? <>
-                <rect x={x} y={y} width={width} height={height} fill={fill} />
-                <path d={`M ${x + 12} ${y} H ${x} V ${y + height} H ${x + 12}`} stroke={diagramColor("annotation")} strokeWidth="2" fill="none" />
-                <TextLines text={step.title} x={cx + 3} y={cy + 4} width={width - 24} maxLines={4} size={11} color={diagramColor("muted")} />
+                <rect className="diagram-annotation-hit-area" x={x} y={y} width={width} height={height} fill="transparent" />
+                <path d={`M ${x + 10} ${y} H ${x} V ${y + height} H ${x + 10}`} stroke={diagramColor("annotation")} strokeWidth="1.2" fill="none" />
+                <AnnotationText text={annotationText(step)} x={x} y={y} width={width} height={height} />
               </> : <>
                 <rect x={x} y={y} width={width} height={height} rx="9" fill={fill} stroke={stroke} strokeWidth="1.6" />
                 {step.type === "userTask" && <g transform={`translate(${x + 13} ${y + 11})`} stroke={diagramColor("muted")} strokeWidth="1.4" fill="none"><circle cx="4" cy="3" r="2.5" /><path d="M 0 11 V 9 Q 0 6 4 6 Q 8 6 8 9 V 11" /></g>}
@@ -855,10 +903,10 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
                 <TextLines text={step.title} x={cx} y={cy + (step.type === "subprocess" ? -1 : 4)} width={width - 26} maxLines={step.type === "subprocess" ? 3 : 4} />
                 {step.type === "subprocess" && <g><rect x={cx - 6} y={y + height - 17} width="12" height="12" rx="1" fill={diagramColor("node")} stroke={diagramColor("muted")} /><path d={`M ${cx - 3} ${y + height - 11} H ${cx + 3} M ${cx} ${y + height - 14} V ${y + height - 8}`} fill="none" stroke={diagramColor("muted")} strokeWidth="1.2" /></g>}
               </>}
-              <g className="diagram-step-number" pointerEvents="none">
+              {step.type !== "annotation" && <g className="diagram-step-number" pointerEvents="none">
                 <rect x={x - 5} y={y - 15} width={stepNumber.length > 2 ? 27 : 22} height="17" rx="5" fill={selected ? diagramColor("accent") : diagramColor("badge")} stroke={selected ? diagramColor("accent") : diagramColor("border")} strokeWidth="0.8" />
                 <text x={x + (stepNumber.length > 2 ? 8.5 : 6)} y={y - 3} textAnchor="middle" fill={selected ? diagramColor("on-accent") : diagramColor("muted")} fontFamily="'DM Mono', monospace" fontSize="10" fontWeight="500">{stepNumber}</text>
-              </g>
+              </g>}
               </g>
               {selected && !selectedRoute && onConnect && step.type !== "end" && activeTool !== "pan" && <g className="diagram-connection-handle" data-editor-only="connection-handle" data-connection-handle={node.id} role="button" tabIndex={0} aria-label={`Keçid çək: ${step.title || "Adsız addım"}`} aria-pressed={connectionSource === node.id} style={{ touchAction: "none" }}
                 onPointerDown={(event) => beginConnection(event, node.id)}
@@ -878,9 +926,8 @@ export default function Diagram({ project, selectedId, selectedRoute, onSelect, 
           })}
           {paletteDraft && (() => {
             const { type, point } = paletteDraft;
-            const width = type === "start" ? 48 : type === "xor" ? 58 : 164;
-            const height = type === "start" ? 48 : type === "xor" ? 58 : type === "annotation" ? 66 : 76;
-            const color = paletteDraft.laneId ? diagramColor("accent") : diagramColor("feedback-edge");
+            const { width, height } = getStepDimensions({ type });
+            const color = paletteDraft.laneId !== null ? diagramColor("accent") : diagramColor("feedback-edge");
             return <g data-editor-only="palette-preview" pointerEvents="none" opacity="0.7">
               {type === "start" ? <circle cx={point.x + width / 2} cy={point.y + height / 2} r={width / 2} fill={diagramColor("node")} stroke={color} strokeWidth="2" strokeDasharray="5 3" />
                 : type === "xor" ? <path d={`M ${point.x + width / 2} ${point.y} L ${point.x + width} ${point.y + height / 2} L ${point.x + width / 2} ${point.y + height} L ${point.x} ${point.y + height / 2} Z`} fill={diagramColor("gateway")} stroke={color} strokeWidth="2" strokeDasharray="5 3" />

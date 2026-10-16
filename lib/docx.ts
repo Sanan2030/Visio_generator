@@ -78,7 +78,7 @@ export function explanationRows(project: Project, options: ExplanationOptions = 
       notes.push(routeNote(0));
       if (step.routes[0].description?.trim()) notes.push(step.routes[0].description.trim());
     }
-    const actor = lanes.get(step.laneId)?.trim() || "İcraçı seçilməyib";
+    const actor = step.laneId === "" ? "Pool-dan kənar" : lanes.get(step.laneId)?.trim() || "İcraçı seçilməyib";
     const mainRow: ExplanationRow = {
       number: getStepNumber(project, step.id),
       stepId: step.id,

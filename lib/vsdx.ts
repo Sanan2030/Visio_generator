@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { layoutProject } from "./layout";
 import { isProject } from "./process";
 import { displayRouteLabel, getStepNumber } from "./step-numbering";
+import { annotationText } from "./annotation-text";
 import { STEP_METADATA_FIELDS, type LayoutEdge, type LayoutNode, type LayoutPoint, type Project, type Route, type Step, type StepMetadataKey } from "./types";
 
 const VISIO_NS = "http://schemas.microsoft.com/office/visio/2012/main";
@@ -43,8 +44,8 @@ function cell(name: string, value: number | string, formula?: string, unit?: str
   return `<Cell N="${escapeAttribute(name)}" V="${escapeAttribute(typeof value === "number" ? number(value) : value)}"${unit ? ` U="${unit}"` : ""}${formula ? ` F="${escapeAttribute(formula)}"` : ""}/>`;
 }
 
-function characterSection(size = 10, color = "#24344B", bold = false): string {
-  return `<Section N="Character"><Row IX="0">${cell("Font", "Calibri")}${cell("Size", size / 72, undefined, "PT")}${cell("Color", color)}${cell("Style", bold ? 1 : 0)}${cell("LangID", 1068)}</Row></Section><Section N="Paragraph"><Row IX="0">${cell("HorzAlign", 1)}</Row></Section>`;
+function characterSection(size = 10, color = "#24344B", bold = false, horizontalAlign = 1): string {
+  return `<Section N="Character"><Row IX="0">${cell("Font", "Calibri")}${cell("Size", size / 72, undefined, "PT")}${cell("Color", color)}${cell("Style", bold ? 1 : 0)}${cell("LangID", 1068)}</Row></Section><Section N="Paragraph"><Row IX="0">${cell("HorzAlign", horizontalAlign)}</Row></Section>`;
 }
 
 type RelativePoint = [number, number];
@@ -83,13 +84,14 @@ interface NativeShapeOptions {
   fontSize?: number;
   bold?: boolean;
   lineWidth?: number;
+  annotation?: boolean;
 }
 
 function nativeShape(options: NativeShapeOptions): string {
   const { id, name, rect, pageHeight, geometry, text } = options;
   const width = rect.width / PIXELS_PER_INCH;
   const height = rect.height / PIXELS_PER_INCH;
-  return `<Shape ID="${id}" Name="${escapeAttribute(name)}" NameU="Shape.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("PinX", (rect.x + rect.width / 2) / PIXELS_PER_INCH)}${cell("PinY", (pageHeight - rect.y - rect.height / 2) / PIXELS_PER_INCH)}${cell("Width", width)}${cell("Height", height)}${cell("LocPinX", width / 2, "Width*0.5")}${cell("LocPinY", height / 2, "Height*0.5")}${cell("Angle", 0)}${cell("FlipX", 0)}${cell("FlipY", 0)}${cell("LineColor", options.line ?? "#8795AD")}${cell("LineWeight", options.lineWidth ?? 0.013889)}${cell("LinePattern", 1)}${cell("FillForegnd", options.fill ?? "#FFFFFF")}${cell("FillPattern", options.fillPattern ?? 1)}${cell("VerticalAlign", 1)}${cell("LeftMargin", 0.07)}${cell("RightMargin", 0.07)}${cell("TopMargin", 0.04)}${cell("BottomMargin", 0.04)}${options.cells ?? ""}${characterSection(options.fontSize, "#24344B", options.bold)}${geometry}${options.sections ?? ""}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(text)}</Text></Shape>`;
+  return `<Shape ID="${id}" Name="${escapeAttribute(name)}" NameU="Shape.${id}" Type="Shape" LineStyle="0" FillStyle="0" TextStyle="0">${cell("PinX", (rect.x + rect.width / 2) / PIXELS_PER_INCH)}${cell("PinY", (pageHeight - rect.y - rect.height / 2) / PIXELS_PER_INCH)}${cell("Width", width)}${cell("Height", height)}${cell("LocPinX", width / 2, "Width*0.5")}${cell("LocPinY", height / 2, "Height*0.5")}${cell("Angle", 0)}${cell("FlipX", 0)}${cell("FlipY", 0)}${cell("LineColor", options.line ?? "#8795AD")}${cell("LineWeight", options.lineWidth ?? 0.013889)}${cell("LinePattern", 1)}${cell("FillForegnd", options.fill ?? "#FFFFFF")}${cell("FillPattern", options.fillPattern ?? 1)}${cell("VerticalAlign", options.annotation ? 0 : 1)}${cell("LeftMargin", options.annotation ? 14 / PIXELS_PER_INCH : 0.07)}${cell("RightMargin", options.annotation ? 14 / PIXELS_PER_INCH : 0.07)}${cell("TopMargin", options.annotation ? 6 / PIXELS_PER_INCH : 0.04)}${cell("BottomMargin", 0.04)}${options.cells ?? ""}${characterSection(options.fontSize, options.annotation ? "#4472C4" : "#24344B", options.bold, options.annotation ? 0 : 1)}${geometry}${options.sections ?? ""}<Text xml:space="preserve"><cp IX="0"/><pp IX="0"/>${escapeXml(text)}</Text></Shape>`;
 }
 
 function properties(step: Step): string {
@@ -170,9 +172,12 @@ function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number,
     geometry = polyline(0, [[0, 0], [1, 0], [1, 0.76], [0.8, 1], [0, 1], [0, 0]], width, height, true);
     geometry += polyline(1, [[0.8, 1], [0.8, 0.76], [1, 0.76]], width, height);
   } else if (step.type === "annotation") {
-    line = "#A0A8B8";
+    line = "#BFC3C7";
+    lineWidth = 1.2 / PIXELS_PER_INCH;
+    fontSize = 9.75;
     cells = cell("Rounding", 0);
-    geometry = polyline(0, [[0.12, 1], [0, 1], [0, 0], [0.12, 0]], width, height);
+    const bracket = 10 / node.width;
+    geometry = polyline(0, [[bracket, 1], [0, 1], [0, 0], [bracket, 0]], width, height);
   } else if (step.type === "subprocess") {
     geometry += polyline(1, [[0.46, 0.08], [0.54, 0.08], [0.54, 0.23], [0.46, 0.23], [0.46, 0.08]], width, height);
     geometry += polyline(2, [[0.5, 0.105], [0.5, 0.205]], width, height);
@@ -182,7 +187,7 @@ function nodeShape(step: Step, node: LayoutNode, id: number, pageHeight: number,
   } else if (step.type === "userTask") {
     fill = "#F0FAF7";
   }
-  return nativeShape({ id, name: step.title, rect: node, pageHeight, geometry, text: displayText, fill, fillPattern: step.type === "annotation" ? 0 : 1, line, cells, fontSize, lineWidth, sections: connectionPoints(width, height, anchors) + properties(step) });
+  return nativeShape({ id, name: step.title, rect: node, pageHeight, geometry, text: step.type === "annotation" ? annotationText(step) : displayText, fill, fillPattern: step.type === "annotation" ? 0 : 1, line, cells, fontSize, lineWidth, annotation: step.type === "annotation", sections: connectionPoints(width, height, anchors) + properties(step) });
 }
 
 function nearestAnchor(node: LayoutNode, point: LayoutPoint, anchors: RelativePoint[]): number {
@@ -274,7 +279,7 @@ export async function generateVsdx(project: Project): Promise<Uint8Array> {
   const laneIds = new Set(project.pools.flatMap((pool) => pool.lanes.map((lane) => lane.id)));
   const stepIds = new Set(project.steps.map((step) => step.id));
   for (const step of project.steps) {
-    if (!laneIds.has(step.laneId)) throw new Error(`“${step.title || "Adsız addım"}” üçün mövcud icraçı zolağı seçin.`);
+    if (step.laneId !== "" && !laneIds.has(step.laneId)) throw new Error(`“${step.title || "Adsız addım"}” üçün mövcud icraçı zolağı seçin.`);
     if (step.routes.some((route) => !stepIds.has(route.targetId))) {
       throw new Error(`“${step.title || "Adsız addım"}” addımındakı keçidin hədəfi mövcud deyil.`);
     }

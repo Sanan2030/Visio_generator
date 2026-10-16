@@ -95,6 +95,12 @@ function idValue(value: unknown): value is string {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 }
 
+function positionValue(value: unknown): boolean {
+  return value === undefined || (record(value) && typeof value.x === "number" && Number.isFinite(value.x)
+    && typeof value.y === "number" && Number.isFinite(value.y) && value.x >= 0 && value.y >= 0
+    && value.x <= MAX_STEP_POSITION && value.y <= MAX_STEP_POSITION);
+}
+
 function sizeValue(value: unknown): boolean {
   return value === undefined || (record(value)
     && typeof value.width === "number" && Number.isFinite(value.width)
@@ -118,7 +124,7 @@ export function isProject(input: unknown): input is Project {
   };
   for (const pool of input.pools) {
     if (!record(pool) || !addId(pool.id) || !textValue(pool.name, 300)
-      || !sizeValue(pool.size)
+      || !sizeValue(pool.size) || !positionValue(pool.position)
       || !Array.isArray(pool.lanes) || pool.lanes.length > 20) return false;
     laneCount += pool.lanes.length;
     if (laneCount > 160) return false;
@@ -127,7 +133,7 @@ export function isProject(input: unknown): input is Project {
     }
   }
   for (const step of input.steps) {
-    if (!record(step) || !addId(step.id) || !idValue(step.laneId) || typeof step.type !== "string" || !TYPES.has(step.type)
+    if (!record(step) || !addId(step.id) || (step.laneId !== "" && !idValue(step.laneId)) || typeof step.type !== "string" || !TYPES.has(step.type)
       || !sizeValue(step.size)
       || !textValue(step.title, 500) || !textValue(step.description, 20000)
       || !Array.isArray(step.routes) || step.routes.length > 200) return false;
@@ -153,7 +159,7 @@ export function isProject(input: unknown): input is Project {
  */
 function gatewayPairIssues(flowSteps: Step[], poolByLane: Map<string, string>): ValidationIssue[] {
   const byId = new Map(flowSteps.map(step => [step.id, step]));
-  const poolByStep = new Map(flowSteps.map(step => [step.id, poolByLane.get(step.laneId)]));
+  const poolByStep = new Map(flowSteps.map(step => [step.id, step.laneId === "" ? "" : poolByLane.get(step.laneId)]));
   // Cross-pool message flows cannot form a sequence-flow split/join pair.
   const outputs = new Map(flowSteps.map(step => [step.id, step.type === "end" ? [] :
     [...new Set(step.routes.map(route => route.targetId).filter(id => byId.has(id)
@@ -245,7 +251,7 @@ export function validateProject(project: Project): ValidationIssue[] {
   }
   for (const step of project.steps) {
     checkId(step.id);
-    if (!laneIds.has(step.laneId)) add("error", `“${step.title || "Adsız addım"}” üçün mövcud icraçı zolağı seçin.`, step.id);
+    if (step.laneId !== "" && !laneIds.has(step.laneId)) add("error", `“${step.title || "Adsız addım"}” üçün mövcud icraçı zolağı seçin.`, step.id);
     if (!step.title.trim()) add("warning", "Addımın adını daxil edin.", step.id);
     const seenRoutes = new Set<string>();
     for (const route of step.routes) {
@@ -326,7 +332,7 @@ export function explainProject(project: Project): string {
   lines.push("", "Addımlar");
   project.steps.forEach((step, index) => {
     const kind = STEP_TYPES.find((type) => type.value === step.type)?.label || step.type;
-    lines.push("", `${index + 1}. ${step.title || "Adsız addım"} — ${laneNames.get(step.laneId) || "İcraçı seçilməyib"} (${kind})`);
+    lines.push("", `${index + 1}. ${step.title || "Adsız addım"} — ${step.laneId === "" ? "Pool-dan kənar" : laneNames.get(step.laneId) || "İcraçı seçilməyib"} (${kind})`);
     if (step.description.trim()) lines.push(step.description.trim());
     for (const field of STEP_METADATA_FIELDS) {
       const value = step[field.key]?.trim();

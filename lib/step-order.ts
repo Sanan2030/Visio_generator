@@ -20,7 +20,7 @@ export function insertStepAfter(project: Project, afterId: string, newStep: Step
     || !/^[a-zA-Z0-9_-]{1,128}$/.test(newStep.id)
     || project.steps.some((step) => step.id === newStep.id)
     || project.pools.some((pool) => pool.id === newStep.id || pool.lanes.some((lane) => lane.id === newStep.id))
-    || !project.pools.some((pool) => pool.lanes.some((lane) => lane.id === newStep.laneId))) return project;
+    || (newStep.laneId !== "" && !project.pools.some((pool) => pool.lanes.some((lane) => lane.id === newStep.laneId)))) return project;
   const original = project.steps[index];
   const byId = new Map(project.steps.map((step) => [step.id, step]));
   const flowRouteIndices = original.routes.flatMap((route, routeIndex) => {
@@ -49,7 +49,7 @@ export function insertStepAfter(project: Project, afterId: string, newStep: Step
   const layout = layoutProject(next);
   const node = layout.nodes.find(item => item.id === inserted.id);
   const lane = layout.lanes.find(item => item.id === inserted.laneId);
-  if (!node || !lane) return next;
+  if (!node) return next;
   const sameLaneIds = new Set(next.steps.filter(item => item.laneId === inserted.laneId && item.id !== inserted.id).map(item => item.id));
   const others = layout.nodes.filter(item => sameLaneIds.has(item.id));
   let y = node.y;
@@ -58,7 +58,7 @@ export function insertStepAfter(project: Project, afterId: string, newStep: Step
     y += 118;
   }
   return y === node.y ? next : { ...next, steps: next.steps.map(item => item.id === inserted.id
-    ? { ...item, position: { x: node.x, y: y - lane.y } } : item) };
+    ? { ...item, position: { x: node.x - (lane?.x ?? 16) + 16, y: y - (lane?.y ?? 0) } } : item) };
 }
 
 /** Breadth-first flow order; drafts, notes and disconnected steps are retained. */
