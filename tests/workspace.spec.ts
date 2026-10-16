@@ -247,9 +247,13 @@ test("the example downloads editable native Visio shapes and the process explana
   const zip = await JSZip.loadAsync(vsdx, { checkCRC32: true });
   expect(zip.file("[Content_Types].xml")).not.toBeNull();
   expect(zip.file("visio/document.xml")).not.toBeNull();
+  expect(zip.file("visio/windows.xml")).not.toBeNull();
+  expect(Object.values(zip.files).every(part => !part.dir)).toBe(true);
   const pageXml = await zip.file("visio/pages/page1.xml")!.async("string");
   expect(XMLValidator.validate(pageXml)).toBe(true);
   expect(pageXml).toContain("Əsas məlumatları doldur");
+  expect(pageXml).not.toContain("<Text xml:space=");
+  expect(pageXml).toContain('N="LangID" V="az-Latn-AZ"');
   expect(pageXml).toContain("<Connects>");
   expect(pageXml.match(/<Row N="ProjectStepId">/g)).toHaveLength(20);
   await openSection(page, "İştirakçılar");

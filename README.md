@@ -140,7 +140,7 @@ Rəsmi sənədlər: [GitHub inteqrasiyası](https://vercel.com/docs/git/vercel-f
 
 Bu, əsas BPMN elementləri ilə diaqram redaktorudur; biznes prosesini icra edən mühərrik və tam BPMN standart validatoru deyil. Alt proses vahid fiqur kimi göstərilir, iç-içə ayrıca səhifə redaktoru hələ yoxdur. Pool/lane-lər VSDX-də redaktə olunan fiqurlardır, Visio-nun xüsusi container/master-ləri deyil; pool-u hərəkət etdirmək daxilindəki elementləri birlikdə daşımır.
 
-VSDX native fiqurlar, Unicode mətn və əlaqəli birləşdiricilərdən ibarətdir. Oxların Shape Data hissəsində başlanğıc/hədəf identifikatorları, etiket, tam izah və qol nömrəsi saxlanılır. ZIP/XML struktur testləri və LibreOffice import/conversion yoxlaması var. Microsoft Visio Desktop/Web-də açmaq, fiquru dəyişmək və birləşdiricini yoxlamaq ayrıca əl ilə qəbul sınağı tələb edir.
+VSDX native fiqurlar, Unicode mətn və əlaqəli birləşdiricilərdən ibarətdir. Oxların Shape Data hissəsində başlanğıc/hədəf identifikatorları, etiket, tam izah və qol nömrəsi saxlanılır. ZIP/XML və Visio uyğunluq testləri pəncərə hissəsini, hissələrarası əlaqələri, mətn strukturunu, şrift və dil məlumatlarını yoxlayır. İxrac Microsoft-un yaratdığı VSDX nümunələri ilə müqayisə olunub; ayrıca oxuyucuda bütün elementlərin importu da yoxlanılıb. Microsoft Visio Desktop/Web-də açmaq, fiquru dəyişmək və birləşdiricini yoxlamaq ayrıca əl ilə qəbul sınağı tələb edir.
 
 **Sloth AI hazırda qoşulmayıb.** İstifadə yeri və API müqaviləsi dəqiqləşəndən sonra inteqrasiya ayrıca əlavə edilə bilər. Hazırkı izah xarici AI çağırışı etmədən, formaya daxil edilən məlumatlardan qaydalar əsasında hazırlanır.
 

@@ -173,6 +173,43 @@ test("VSDX is a valid XML/ZIP OPC package and every internal relationship resolv
   assert.ok(Number(array<XmlCell>(pages.Page.PageSheet.Cell).find((value) => value["@N"] === "PageWidth")?.["@V"]) > 0);
 });
 
+// Native Text has no attributes in the Visio Text_Type schema; xml:space is
+// inherited from PageContents, as in Microsoft-created VSDX files.
+// https://learn.microsoft.com/office/client-developer/visio/text_type-complextypevisio-xml
+// https://learn.microsoft.com/office/client-developer/visio/windows-elementvisio-xml
+test("Visio desktop compatibility includes a linked drawing window and schema-valid text metadata", async () => {
+  const zip = await JSZip.loadAsync(await generateVsdx(fixture()), { checkCRC32: true });
+  assert.ok(Object.values(zip.files).every(part => !part.dir), "ZIP contains document parts without standalone directory entries");
+  const contentTypes = parser.parse(await zip.file("[Content_Types].xml")!.async("string")).Types;
+  assert.equal(array<XmlOverride>(contentTypes.Override).find(part => part["@PartName"] === "/visio/windows.xml")?.["@ContentType"], "application/vnd.ms-visio.windows+xml");
+  const rels = array<XmlRelationship>(parser.parse(await zip.file("visio/_rels/document.xml.rels")!.async("string")).Relationships.Relationship);
+  assert.equal(rels.find(rel => rel["@Type"] === "http://schemas.microsoft.com/visio/2010/relationships/windows")?.["@Target"], "windows.xml");
+  const pages = parser.parse(await zip.file("visio/pages/pages.xml")!.async("string")).Pages;
+  const windows = parser.parse(await zip.file("visio/windows.xml")!.async("string")).Windows;
+  assert.equal(windows.Window["@Page"], pages.Page["@ID"]);
+  assert.equal(windows.Window["@WindowType"], "Drawing");
+  assert.equal(windows.Window["@ContainerType"], "Page");
+  assert.ok(Number(windows.Window["@ViewScale"]) > 0);
+  assert.ok(Number(windows.Window["@ViewCenterX"]) > 0);
+  assert.ok(Number(windows.Window["@ViewCenterY"]) > 0);
+  const document = parser.parse(await zip.file("visio/document.xml")!.async("string")).VisioDocument;
+  const styleIds = new Set(array<{ "@ID": string }>(document.StyleSheets.StyleSheet).map(style => style["@ID"]));
+  for (const name of ["@LineStyle", "@FillStyle", "@TextStyle"]) assert.ok(styleIds.has(document.DocumentSheet[name]));
+  assert.equal(document.FaceNames.FaceName["@NameU"], "Calibri");
+  const { xml, shapes } = await getPage(zip);
+  assert.match(xml, /<PageContents[^>]+xml:space="preserve"/);
+  const texts = [...xml.matchAll(/<Text([^>]*)>/g)];
+  assert.equal(texts.length, shapes.length);
+  for (const text of texts) assert.equal(text[1], "", "Text_Type does not permit xml:space or other attributes");
+  for (const shape of shapes) {
+    const character = array(shape.Section).find(section => section["@N"] === "Character")!;
+    for (const row of array(character.Row)) {
+      assert.equal(array(row.Cell).find(value => value["@N"] === "Font")?.["@V"], "Calibri");
+      assert.equal(array(row.Cell).find(value => value["@N"] === "LangID")?.["@V"], "az-Latn-AZ", "VSDX language values use locale names, not decimal LCIDs");
+    }
+  }
+});
+
 test("VSDX exports all supported symbols as editable shapes and preserves Unicode text", async () => {
   const project = fixture();
   const layout = layoutProject(project);
