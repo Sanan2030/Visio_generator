@@ -61,3 +61,15 @@ export function resizeDiagramStep(project: Project, stepId: string, size: Diagra
   return { ...project, steps: project.steps.map(item => item.id === stepId ? { ...item, size: nextSize,
     ...(position ? { position } : {}) } : item) };
 }
+
+/** Release both explicit pool dimensions and lane boundaries pinned by a pasted diagram. */
+export function resetDiagramPoolSize(project: Project, poolId: string): Project {
+  const pool = project.pools.find(item => item.id === poolId);
+  if (!pool || (!pool.size && !pool.lanes.some(lane => lane.height !== undefined))) return project;
+  return { ...project, pools: project.pools.map(item => {
+    if (item.id !== poolId) return item;
+    const { size, ...next } = item;
+    void size;
+    return { ...next, lanes: next.lanes.map(({ height, ...lane }) => { void height; return lane; }) };
+  }) };
+}

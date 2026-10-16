@@ -129,7 +129,9 @@ export function isProject(input: unknown): input is Project {
     laneCount += pool.lanes.length;
     if (laneCount > 160) return false;
     for (const lane of pool.lanes) {
-      if (!record(lane) || !addId(lane.id) || !textValue(lane.name, 300)) return false;
+      if (!record(lane) || !addId(lane.id) || !textValue(lane.name, 300)
+        || (lane.height !== undefined && (typeof lane.height !== "number" || !Number.isFinite(lane.height)
+          || lane.height <= 0 || lane.height > MAX_STEP_POSITION))) return false;
     }
   }
   for (const step of input.steps) {

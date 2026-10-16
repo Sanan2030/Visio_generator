@@ -1,27 +1,29 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, CircleHelp, FileText, GitBranch, Layers3, LoaderCircle, Plus, Ruler, ShieldCheck, Trash2, X } from "lucide-react";
-import { STEP_METADATA_FIELDS, type DiagramSize, type Step, type StepMetadataKey, type StepType } from "@/lib/types";
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, CircleHelp, ClipboardPaste, Copy, FileText, GitBranch, Layers3, LoaderCircle, Plus, Ruler, ShieldCheck, Trash2, X } from "lucide-react";
+import { STEP_METADATA_FIELDS, type DiagramSize, type Project, type Step, type StepMetadataKey, type StepType } from "@/lib/types";
 import { createId, createProject, SAMPLE_PROJECT, STEP_TYPES, validateProject } from "@/lib/process";
 import { clampNodePosition } from "@/lib/layout";
 import { assignDiagramStep, duplicateDiagramStep, moveDiagramPool, moveDiagramStep, reconnectDiagramRoute } from "@/lib/diagram-edit";
 import { insertDiagramStepOnRoute, moveDiagramStepOnRoute, type DiagramInsertionResult } from "@/lib/diagram-splice";
-import { resizeProjectCanvas, resizeDiagramPool, resizeDiagramStep } from "@/lib/diagram-size";
+import { resizeProjectCanvas, resetDiagramPoolSize, resizeDiagramPool, resizeDiagramStep } from "@/lib/diagram-size";
 import { getRouteNumber } from "@/lib/step-numbering";
 import { insertStepAfter, moveStepInOrder, reorderStepsByFlow } from "@/lib/step-order";
 import { createProcessTemplate, PROCESS_TEMPLATES, type ProcessTemplateId } from "@/lib/templates";
-import { download, filename } from "@/lib/storage";
+import { pasteDiagram, serializeDiagram } from "@/lib/diagram-clipboard";
+import { DIAGRAM_CLIPBOARD_KEY, download, filename } from "@/lib/storage";
 import { useProject } from "@/lib/use-project";
 import Diagram, { type DiagramRouteSelection } from "./diagram";
 import CanvasInspector from "./canvas-inspector";
 import ExplanationTable from "./explanation-table";
 import StepMetadataFields from "./step-metadata-fields";
+import { DiagramPaste } from "./diagram-paste";
 import { DiagramDimensions } from "./diagram-dimensions";
 import { ResizableSidebarSeparator } from "./resizable-sidebar-separator";
 
 type Tab = "people" | "steps" | "explanation";
-type Modal = "reset" | "sample" | "help" | "table" | "dimensions" | null;
+type Modal = "reset" | "sample" | "help" | "table" | "dimensions" | "paste" | null;
 const SIDEBAR_PREFERENCE = "visioflow:sidebar-width";
 
 const tabs: { value: Tab; label: string }[] = [
@@ -57,6 +59,8 @@ export default function Workspace() {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const previousProject = useRef("");
+  const copiedDiagram = useRef("");
+  const [pasteText, setPasteText] = useState("");
   const issues = useMemo(() => validateProject(project), [project]);
   const errors = issues.filter(issue => issue.level === "error");
   const lanes = project.pools.flatMap(pool => pool.lanes.map(lane => ({ ...lane, poolName: pool.name })));
@@ -225,7 +229,7 @@ export default function Workspace() {
   function resizePool(id: string, size: DiagramSize) { update(current => resizeDiagramPool(current, id, size)); }
   function resizeStep(id: string, size: DiagramSize) { update(current => resizeDiagramStep(current, id, size)); }
   function resetCanvasSize() { update(current => { if (!current.size) return current; const { size, ...next } = current; void size; return next; }); }
-  function resetPoolSize(id: string) { update(current => { if (!current.pools.find(pool=>pool.id===id)?.size) return current; return { ...current, pools: current.pools.map(pool => { if (pool.id !== id || !pool.size) return pool; const { size, ...next } = pool; void size; return next; }) }; }); }
+  function resetPoolSize(id: string) { update(current => resetDiagramPoolSize(current, id)); }
   function resetStepSize(id: string) { update(current => { if (!current.steps.find(step=>step.id===id)?.size) return current; return { ...current, steps: current.steps.map(step => { if (step.id !== id || !step.size) return step; const { size, ...next } = step; void size; return next; }) }; }); }
 
   function reconnectRoute(selection: DiagramRouteSelection, endpoint: "source" | "target", nodeId: string): boolean {
@@ -308,7 +312,7 @@ export default function Workspace() {
   }
 
   function clearProjects() {
-    reset();
+    if (reset()) copiedDiagram.current = "";
     setModal(null);
   }
 
@@ -404,6 +408,48 @@ export default function Workspace() {
     selectRoute(step.id, step.routes.length);
   }
 
+  async function copyWholeDiagram() {
+    setMenuOpen(false);
+    try {
+      const text = serializeDiagram(project);
+      copiedDiagram.current = text;
+      let stored = false;
+      let clipboard = false;
+      try { localStorage.setItem(DIAGRAM_CLIPBOARD_KEY, text); stored = true; } catch { /* The file and session copy remain available. */ }
+      try { await navigator.clipboard.writeText(text); clipboard = true; } catch { /* Browser copies do not require clipboard permission. */ }
+      setNotice(stored
+        ? clipboard ? "Bütün diaqram kopyalandı və bu brauzerdə saxlanıldı." : "Diaqram nüsxəsi bu brauzerdə saxlanıldı. Başqa axında “Diaqram yapışdır” seç."
+        : clipboard ? "Diaqram buferə kopyalandı. Qalıcı saxlamaq üçün nüsxəni fayl kimi yüklə." : "Nüsxə bu sessiyada saxlanıldı. Qalıcı saxlamaq üçün nüsxəni fayl kimi yüklə.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Diaqram kopyalanmadı."); }
+  }
+
+  function openPasteDiagram() {
+    let text = copiedDiagram.current;
+    try { if (!text) text = localStorage.getItem(DIAGRAM_CLIPBOARD_KEY) || ""; } catch { /* Session copies remain usable if storage is blocked. */ }
+    setPasteText(text);
+    setMenuOpen(false);
+    setModal("paste");
+  }
+
+  function pasteWholeDiagram(source: Project) {
+    let stepIds: string[] = [];
+    update(current => {
+      const result = pasteDiagram(current, source);
+      stepIds = result.stepIds;
+      return result.project;
+    });
+    setSelected(stepIds[0] ?? null);
+    setSelectedRoute(null); setRouteEditorOpen(false); setInspectorStep(null);
+    setTab("steps"); setModal(null);
+    setNotice("Diaqram cari axına əlavə edildi. Mövcud elementlər saxlanıldı.");
+  }
+
+  function downloadDiagramCopy() {
+    setMenuOpen(false);
+    try { download(serializeDiagram(project), `${filename(project.name)}.visioflow.json`, "application/json"); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "Diaqram nüsxəsi hazırlanmadı."); }
+  }
+
   async function exportVisio() {
     setMenuOpen(false);
     if (!project.steps.length) { setNotice("Əvvəl prosesin ilk addımını əlavə et."); setTab("steps"); return; }
@@ -458,6 +504,9 @@ export default function Workspace() {
             <div className="project-menu" ref={projectMenuRef}>
               <button type="button" aria-label="Yeni diaqram" disabled={!ready} onClick={()=>{setMenuOpen(false);replace(createProject());}}><Plus size={16}/> Yeni diaqram</button>
               <button type="button" aria-label="Nümunə proses" disabled={!ready} onClick={()=>{setMenuOpen(false);openSample();}}><Layers3 size={16}/> Nümunə proses</button>
+              <button type="button" aria-label="Bütün diaqramı kopyala" disabled={!ready} onClick={()=>void copyWholeDiagram()}><Copy size={16}/> Bütün diaqramı kopyala</button>
+              <button type="button" aria-label="Diaqram yapışdır" disabled={!ready} onClick={openPasteDiagram}><ClipboardPaste size={16}/> Diaqram yapışdır</button>
+              <button type="button" aria-label="Diaqram nüsxəsini yüklə" disabled={!ready} onClick={downloadDiagramCopy}><ArrowDownToLine size={16}/> Diaqram nüsxəsini yüklə</button>
               <button type="button" aria-label="SVG kimi yüklə" disabled={!ready || exportingImage!==null} onClick={()=>void exportImage("svg")}><ArrowDownToLine size={16}/> SVG kimi yüklə</button>
               <button type="button" aria-label="PNG kimi yüklə" disabled={!ready || exportingImage!==null} onClick={()=>void exportImage("png")}><ArrowDownToLine size={16}/> PNG kimi yüklə</button>
               <button type="button" onClick={()=>{setMenuOpen(false);setModal("help");}}><CircleHelp size={16}/> Necə işləyir?</button>
@@ -601,14 +650,14 @@ export default function Workspace() {
     {activeModal && <div className="modal-overlay" onClick={closeModal}><section className={`modal ${activeModal==="table"?"word-table-modal":""}`} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={event=>event.stopPropagation()}>
       <button type="button" className="modal-close icon-button" aria-label="Pəncərəni bağla" onClick={closeModal}><X size={18}/></button>
       <span className={`modal-icon ${activeModal==="reset"||activeModal==="unsaved"?"red":""}`}>{activeModal==="reset"?<Trash2 size={24}/>:activeModal==="sample"?<Layers3 size={24}/>:<CircleHelp size={24}/>}</span>
-      <h2 id="modal-title">{activeModal==="reset"?"Hər şeyi silmək istəyirsən?":activeModal==="sample"?"Nümunə prosesi açaq?":activeModal==="unsaved"?"Dəyişikliklər saxlanılmayıb":activeModal==="table"?"İş axınının izah cədvəli":activeModal==="dimensions"?"Diaqram ölçüləri":"Formadan Visio diaqramına"}</h2>
-      {activeModal==="dimensions"?<><DiagramDimensions project={project} selectedStepId={selected} onResizeCanvas={resizeCanvas} onResizePool={resizePool} onResizeStep={resizeStep} onResetCanvas={resetCanvasSize} onResetPool={resetPoolSize} onResetStep={resetStepSize}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button></div></>:activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project} options={{columns:wordColumns}}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru başqa iştirakçının sahəsinə sürüşdür: izahda icraçı da dəyişir. İki kliklə və ya Redaktə et düyməsi ilə paneli aç. Seçilmiş fiqurun + tutacağını digər fiqura apararaq yeni keçid yarat.</p><p><strong>3. Keçidə izah yaz.</strong> Xətti seçib ucundakı dairəni başqa fiqura sürüşdürərək oxun başlanğıcını və ya hədəfini dəyiş. Etiketə basıb qısa mətni və ətraflı izahı doldur. İcraçı, hədəf və qol nömrələri Word cədvəlində də yenilənir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
+      <h2 id="modal-title">{activeModal==="reset"?"Hər şeyi silmək istəyirsən?":activeModal==="sample"?"Nümunə prosesi açaq?":activeModal==="unsaved"?"Dəyişikliklər saxlanılmayıb":activeModal==="table"?"İş axınının izah cədvəli":activeModal==="dimensions"?"Diaqram ölçüləri":activeModal==="paste"?"Diaqram yapışdır":"Formadan Visio diaqramına"}</h2>
+      {activeModal==="paste"?<DiagramPaste initialText={pasteText} onPaste={pasteWholeDiagram} onClose={closeModal}/>:activeModal==="dimensions"?<><DiagramDimensions project={project} selectedStepId={selected} onResizeCanvas={resizeCanvas} onResizePool={resizePool} onResizeStep={resizeStep} onResetCanvas={resetCanvasSize} onResetPool={resetPoolSize} onResetStep={resetStepSize}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button></div></>:activeModal==="table"?<><p>{project.name}</p><ExplanationTable project={project} options={{columns:wordColumns}}/><div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Bağla</button><button type="button" className="primary-button" disabled={exportingWord} onClick={()=>void exportWord()}><ArrowDownToLine size={14}/> Word faylını yüklə</button></div></>:activeModal==="help"?<div className="help-content"><p><strong>1. İştirakçıları əlavə et.</strong> Prosesin adını, pool-ları və onların daxilindəki rolları yaz.</p><p><strong>2. Addımları doldur.</strong> Fiquru başqa iştirakçının sahəsinə sürüşdür: izahda icraçı da dəyişir. İki kliklə və ya Redaktə et düyməsi ilə paneli aç. Seçilmiş fiqurun + tutacağını digər fiqura apararaq yeni keçid yarat.</p><p><strong>3. Keçidə izah yaz.</strong> Xətti seçib ucundakı dairəni başqa fiqura sürüşdürərək oxun başlanğıcını və ya hədəfini dəyiş. Etiketə basıb qısa mətni və ətraflı izahı doldur. İcraçı, hədəf və qol nömrələri Word cədvəlində də yenilənir.</p><p><strong>4. Faylları yüklə.</strong> Diaqram .vsdx, izah isə redaktə olunan .docx cədvəli kimi yüklənir.</p><p>Dəyişikliklər bu brauzerdə avtomatik saxlanılır. Eyni ünvanı açanda və ya səhifəni yeniləyəndə işinə davam edirsən. Ünvanın hash hissəsini silsən, yeni boş layihə başlayır.</p><button type="button" className="primary-button" onClick={closeModal}>Aydındır <Check size={15}/></button></div>:<>
         {activeModal==="sample" && <fieldset className="template-options"><legend>Hazır proses seç</legend>
           {[{id:"customer", name:"Müştəri müraciətləri", description:"Əvvəlki operator, vizaçı və icraçı nümunəsi."}, ...PROCESS_TEMPLATES].map(item=><label key={item.id} className={`template-option ${templateId===item.id ? "is-selected" : ""}`}>
             <input type="radio" name="process-template" aria-label={item.name} checked={templateId===item.id} onChange={()=>setTemplateId(item.id as ProcessTemplateId|"customer")}/><span><strong>{item.name}</strong><small>{item.description}</small></span>
           </label>)}
         </fieldset>}
-        <p>{activeModal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri silinəcək. Bu əməliyyat geri qaytarılmır.":activeModal==="sample"?"Seçdiyin nümunə açılacaq. Saxlanmış layihən öz əvvəlki ünvanında qalacaq.":"Brauzer son dəyişiklikləri saxlaya bilmədi. Hazırkı işi açıq saxlaya və ya dəyişiklikləri itirməyi qəbul edib davam edə bilərsən."}</p>
+        <p>{activeModal==="reset"?"Bu brauzerdəki bütün VisioFlow layihələri və saxlanmış diaqram nüsxəsi silinəcək. Bu əməliyyat geri qaytarılmır.":activeModal==="sample"?"Seçdiyin nümunə açılacaq. Saxlanmış layihən öz əvvəlki ünvanında qalacaq.":"Brauzer son dəyişiklikləri saxlaya bilmədi. Hazırkı işi açıq saxlaya və ya dəyişiklikləri itirməyi qəbul edib davam edə bilərsən."}</p>
         <div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Ləğv et</button><button type="button" className={activeModal==="sample"?"primary-button":"danger-button"} onClick={activeModal==="reset"?clearProjects:activeModal==="sample"?sample:()=>{confirmReplacement();setModal(null);}}>{activeModal==="reset"?"Bəli, hər şeyi sil":activeModal==="sample"?"Nümunəni aç":"Saxlamadan davam et"}</button></div>
       </>}
     </section></div>}

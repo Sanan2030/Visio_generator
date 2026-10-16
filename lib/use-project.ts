@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createProject } from "./process";
 import { HISTORY_LIMIT, recordHistory, type HistoryGroup } from "./project-history";
-import { cleanupEmptyProjects, hasProjectContent, MAX_FILE_SIZE, parseProject, persistProject, STORAGE_PREFIX } from "./storage";
+import { cleanupEmptyProjects, DIAGRAM_CLIPBOARD_KEY, hasProjectContent, MAX_FILE_SIZE, parseProject, persistProject, STORAGE_PREFIX } from "./storage";
 import type { Project } from "./types";
 
 export type SaveState = "saving" | "saved" | "unavailable";
@@ -235,7 +235,7 @@ export function useProject() {
     historyGroup.current = null;
     let removedCurrent = false;
     try {
-      const keys = Object.keys(localStorage).filter((key) => key.startsWith(STORAGE_PREFIX));
+      const keys = Object.keys(localStorage).filter((key) => key.startsWith(STORAGE_PREFIX) || key === DIAGRAM_CLIPBOARD_KEY);
       for (const key of keys) {
         localStorage.removeItem(key);
         if (key === STORAGE_PREFIX + current.current.id) removedCurrent = true;

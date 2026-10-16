@@ -2,6 +2,7 @@ import type { Project } from "./types";
 import { isProject } from "./process";
 
 export const STORAGE_PREFIX = "visioflow:v1:";
+export const DIAGRAM_CLIPBOARD_KEY = "visioflow:diagram-clipboard:v1";
 export const MAX_FILE_SIZE = 100_000_000;
 // A 2 MB UTF-8 draft needs at most about 4 MB of UTF-16 storage, leaving
 // room for its key inside the usual 5 MiB localStorage quota. The origin's
@@ -10,7 +11,7 @@ export const MAX_STORED_SIZE = 2_000_000;
 export const FILE_SIZE_LABEL = formatFileSize(MAX_FILE_SIZE);
 
 export function hasProjectContent(project: Project): boolean {
-  return project.size !== undefined || project.pools.some(pool => pool.size !== undefined || pool.position !== undefined)
+  return project.size !== undefined || project.pools.some(pool => pool.size !== undefined || pool.position !== undefined || pool.lanes.some(lane => lane.height !== undefined))
     || project.steps.length > 0 || project.name !== "Yeni iş axını"
     || project.pools.length !== 1 || project.pools[0].name !== "Təşkilat"
     || project.pools[0].lanes.length !== 1 || project.pools[0].lanes[0].name !== "İştirakçı 1";

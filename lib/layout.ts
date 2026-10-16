@@ -175,7 +175,7 @@ export function layoutProject(project: Project): ProjectLayout {
       const laneHeight = pool.size || project.size ? Math.max(96, nodeBottom + corridorSpace)
         : Math.max(208, stackCount * rowPitch + 108 + Math.max(0, corridorCount - 1) * CORRIDOR_PITCH,
           nodeBottom + corridorSpace);
-      return { lane, nodes: laneNodes, height: laneHeight };
+      return { lane, nodes: laneNodes, height: Math.max(laneHeight, lane.height ?? 0) };
     });
     const naturalHeight = Math.max(POOL_HEADER + 96, POOL_HEADER + laneContents.reduce((sum, lane) => sum + lane.height, 0));
     const height = Math.max(naturalHeight, pool.size?.height || 0);

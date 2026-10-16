@@ -59,6 +59,8 @@ export interface Step {
 export interface Lane {
   id: string;
   name: string;
+  /** Retain copied lane boundaries independently of automatic node placement. */
+  height?: number;
 }
 
 export interface Pool {

@@ -704,3 +704,12 @@ h1, h2, h3, p { margin: 0; }
 .inspector-position legend { padding: 0 5px; color: var(--muted); font-size: 12px; }
 [data-pool-handle]:focus-visible { outline: none; }
 [data-pool-handle]:focus-visible > path { stroke: var(--accent); stroke-width: 2px; }
+
+.diagram-transfer-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin: 18px 0; }
+.diagram-file-input { flex: 1 1 200px; min-width: 0; }
+.diagram-file-input > span { display: flex; align-items: center; gap: 7px; }
+.diagram-file-input input { max-width: 100%; font-size: 12px; }
+.diagram-copy-text { font-family: "DM Mono", monospace; font-size: 12px; overflow-wrap: anywhere; }
+.diagram-paste-summary { padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 13px; }
+.diagram-transfer-error { color: var(--danger); font-size: 13px; line-height: 1.6; }
+.project-menu { max-height: min(80dvh, 600px); overflow-y: auto; }

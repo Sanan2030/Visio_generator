@@ -50,13 +50,23 @@ Oxun xəttinə basmaq onu seçir və hər iki ucunda dairə tutacağı göstəri
 
 Layihə məlumatı serverə göndərilmir. Dəyişikliklər 300 ms fasilədən sonra `localStorage`-da `visioflow:v1:<id>` açarı ilə saxlanılır; səhifədən çıxanda və layihə dəyişəndə gözləyən yazma dərhal tamamlanır. URL-dəki `#<id>` həmin brauzerdə onu bərpa edir. Səhifəni yeniləyəndə, bağlayıb eyni ünvanı açanda və ya əvvəlki versiyada yaratdığın layihənin hash ünvanına keçəndə işinə davam edə bilərsən. Hash silindikdə yeni boş layihə yaranır.
 
-Hash layihənin identifikatorudur; məlumatın özü brauzerdə qalır. Eyni link başqa cihazda və ya başqa sayt domenində məlumatı bərpa etmir. Brauzerin sayt məlumatları təmizlənəndə saxlanmış layihələr də silinir. İnterfeysdə JSON yükləmə və açma yoxdur.
+Hash layihənin identifikatorudur; məlumatın özü brauzerdə qalır. Eyni link başqa cihazda və ya başqa sayt domenində məlumatı bərpa etmir. Brauzerin sayt məlumatları təmizlənəndə saxlanmış layihələr də silinir. Layihə menyusundan diaqram nüsxəsini fayl kimi yükləmək və başqa axına yapışdırmaq mümkündür.
 
 Boş, dəyişdirilməmiş layihə brauzer yaddaşına yazılmır; əvvəlki boş layihə açarları açılışda səssizcə təmizlənir. Məzmunlu layihələr saxlanılır. Eyni mətn sahəsində 600 ms daxilində ardıcıl dəyişikliklər bir tarixçə girişinə birləşdirilir.
 
 Yuxarıdakı **Saxlanılır…** statusu gözləyən yazmanı, **Saxlanılıb** isə uğurlu yazmanı və ya dəyişdirilməmiş boş formanı göstərir. Brauzer yerli yaddaşı bloklayarsa və ya yaddaş dolarsa **Yaddaş əlçatan deyil** göstərilir; cari dəyişikliklər açıq səhifədə qalır. Yeni diaqram və ya nümunə açmaq istəyəndə saxlanılmamış işin itirilməsinə qarşı təsdiq tələb olunur. Saxlanılmamış dəyişikliklər olduqda səhifədən çıxış üçün brauzer xəbərdarlığı da verilir.
 
-**Layihə menyusu → Hər şeyi sil** təsdiqdən sonra yalnız bu alətin yerli layihə açarlarını silir. Yeni diaqram və ya nümunə açmaq əvvəlki saxlanmış layihəni öz hash ünvanında saxlayır. Silmə uğursuz olarsa hazırkı layihə açıq qalır.
+**Layihə menyusu → Hər şeyi sil** təsdiqdən sonra yalnız bu alətin yerli layihələrini və saxlanmış diaqram nüsxəsini silir. Yeni diaqram və ya nümunə açmaq əvvəlki saxlanmış layihəni öz hash ünvanında saxlayır. Silmə uğursuz olarsa hazırkı layihə açıq qalır.
+
+## Diaqramı kopyalamaq və başqa axına yapışdırmaq
+
+**Layihə menyusu → Bütün diaqramı kopyala** bütün pool-ları, iştirakçıları, addımları, qeydləri, keçidləri, izahları və yerləşməni birlikdə kopyalayır. Son nüsxə bu brauzerdə ayrıca saxlanılır; başqa axına keçəndən və səhifəni yeniləyəndən sonra da istifadə oluna bilər. Brauzer icazə verirsə eyni məlumat sistem buferinə də yazılır.
+
+Başqa axını aç, **Layihə menyusu → Diaqram yapışdır → Diaqramı əlavə et** seç. Mövcud axın qalır, kopyalanmış diaqram onun altına əlavə olunur. Boş yeni axına yapışdıranda başlanğıc boş pool əvəz olunur. Yeni nüsxənin identifikatorları yenilənir; daxili əlaqələr, qeydlər və əlavə məlumatlar qorunur. Yapışdırma bir **Geri al** əməliyyatı ilə ləğv edilir.
+
+Nüsxəni daha sonra və ya başqa cihazda istifadə etmək üçün **Diaqram nüsxəsini yüklə** seç: `.visioflow.json` faylı yaranır. Hədəf axının **Diaqram yapışdır** pəncərəsində **Saxlanmış nüsxəni aç** vasitəsilə faylı seç. Kopyalanmış mətni birbaşa həmin pəncərəyə yapışdırmaq da mümkündür. Nüsxə və nəticə üçün 2 MB yaddaş, 8 pool və 200 element hədləri yoxlanılır; hədd aşılarsa mövcud axın dəyişmir.
+
+Brauzer yaddaşı bloklanarsa nüsxə yalnız açıq sessiyada qalır; növbəti dəfə istifadə üçün faylı yüklə. **Hər şeyi sil** saxlanmış nüsxəni də silir, digər proqramların yerli məlumatlarına toxunmur.
 
 ## Lokal inkişaf
 
